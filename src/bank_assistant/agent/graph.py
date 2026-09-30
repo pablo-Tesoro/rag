@@ -264,9 +264,12 @@ def build_graph(
         )
         approved = isinstance(decision, dict) and decision.get("approved") is True
         if not approved:
+            # Explicit about who decided and what to say: with a vaguer text the real model
+            # answered as if confirmation were still pending and asked for it again.
             outcome = ToolOutcome(
-                "El empleado ha rechazado la incidencia: no se ha registrado. No vuelvas a "
-                "proponerla salvo que el empleado lo pida."
+                "El empleado ha rechazado la incidencia que propusiste: ha decidido no abrirla "
+                "y no se ha registrado. Díselo hablándole de tú y sin pedirle otra "
+                "confirmación. No vuelvas a proponerla salvo que el empleado lo pida de nuevo."
             )
             return {"messages": [_tool_message(call, outcome), *messages]}
 

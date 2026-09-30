@@ -375,3 +375,24 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
   el número de herramientas usadas. Los logs de uvicorn pasan por el mismo formateador JSON.
 - **Trade-offs.** No hay registro por petición de `/healthz` ni de `/readyz`; para eso están
   las métricas del orquestador.
+
+## D-28. Los resultados de las herramientas también son prompt
+
+- **Contexto.** En la prueba real con Gemini, tras rechazar una incidencia, el modelo a
+  veces respondía como si faltara la confirmación y volvía a pedirla. El mensaje que recibía
+  («El empleado ha rechazado la incidencia: no se ha registrado…») era correcto, pero no
+  decía qué contestar. Además, el modelo lo mezclaba con NOR-006 §5 («si el empleado no la
+  confirma, la incidencia no se registra»).
+- **Alternativas.**
+  - Añadir una regla al prompt de sistema: exige una versión `v2` y la regla queda lejos del
+    momento en que el modelo lee la decisión.
+  - Resolver la respuesta por código tras un rechazo, sin volver a llamar al modelo: es
+    fiable, pero quita al modelo el cierre de la conversación (por ejemplo, contestar
+    también a otra pregunta del mismo turno).
+- **Elección.** Corregir el propio mensaje de la herramienta: dice quién ha decidido
+  («ha decidido no abrirla»), que no se ha registrado y que se le diga al empleado, de tú y
+  sin pedir otra confirmación. El prompt de sistema sigue en `v1`.
+- **Trade-offs.** Estos mensajes no llevan versión propia como los prompts. El commit de
+  cada evaluación los identifica, y un test unitario comprueba el contenido del rechazo.
+  Con 6 intentos posteriores el error no se repite, pero la redacción varía: la tasa real
+  se medirá en la fase 4 con repeticiones (pass^k).
