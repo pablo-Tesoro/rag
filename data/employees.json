@@ -1,0 +1,8 @@
+{
+  "notice": "Empleados ficticios de Banco Olvessa (entidad inventada). Sin datos personales: solo rol, oficina y grupos.",
+  "employees": [
+    {"id": "EMP-001", "role": "Gestión comercial", "office_id": "0101", "groups": ["todos"]},
+    {"id": "EMP-002", "role": "Análisis de riesgos", "office_id": "0205", "groups": ["todos", "riesgos"]},
+    {"id": "EMP-003", "role": "Dirección de oficina", "office_id": "0310", "groups": ["todos", "riesgos", "cumplimiento"]}
+  ]
+}

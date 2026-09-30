@@ -1,0 +1,74 @@
+[project]
+name = "bank-assistant"
+version = "0.1.0"
+description = "Agentic assistant for employees of Banco Olvessa (a fictitious bank): RAG over internal policies, core-banking lookups and human-approved incident creation."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pdfplumber>=0.11,<0.12",
+    "pydantic>=2.13,<3",
+    "pydantic-settings>=2.15,<3",
+    "pyyaml>=6.0,<7",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3",
+    "pytest>=9.1",
+    "ruff>=0.16",
+    "types-pyyaml>=6.0",
+]
+# Only needed to regenerate the fictitious PDFs in data/corpus (scripts/build_pdfs.py).
+data = [
+    "reportlab>=5.0,<6",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "."]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "SIM",      # simplify
+    "RUF",      # ruff-specific
+    "PTH",      # prefer pathlib
+    "S",        # bandit (security)
+]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # Spanish text legitimately contains accented/ambiguous chars
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # asserts are the point of tests
+"scripts/**" = ["S311"]  # seeded pseudo-random data generation, not crypto
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+files = ["src", "tests", "scripts", "evals"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["reportlab.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: needs a running Postgres (make up); skipped when it is not reachable",
+]

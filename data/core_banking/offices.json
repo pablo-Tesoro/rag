@@ -1,0 +1,9 @@
+{
+  "notice": "Datos ficticios de Banco Olvessa (entidad inventada), creados con fines de demostración.",
+  "offices": [
+    {"id": "0101", "name": "Madrid – Castellana", "city": "Madrid"},
+    {"id": "0205", "name": "Valencia – Ruzafa", "city": "Valencia"},
+    {"id": "0310", "name": "Sevilla – Triana", "city": "Sevilla"},
+    {"id": "0412", "name": "Bilbao – Abando", "city": "Bilbao"}
+  ]
+}

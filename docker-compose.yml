@@ -1,0 +1,20 @@
+# Phase 1: only the database. The app service is added in phase 3.
+services:
+  db:
+    image: pgvector/pgvector:0.8.6-pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-olvessa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-olvessa-dev-only}
+      POSTGRES_DB: ${POSTGRES_DB:-olvessa}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
