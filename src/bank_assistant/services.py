@@ -56,6 +56,29 @@ def chunk_config(settings: Settings) -> ChunkConfig:
     )
 
 
+def agent_deps(
+    settings: Settings,
+    pool: AsyncConnectionPool,
+    embedder: Embedder,
+    llm: BaseChatModel,
+    prompt: Prompt,
+) -> AgentDeps:
+    """The agent's real dependencies. Shared by the API and the evaluation harness, so the
+    harness evaluates the same wiring that is deployed."""
+    return AgentDeps(
+        llm=llm,
+        search=Retriever(
+            pool, embedder, candidates=settings.retrieval_candidates, rrf_k=settings.rrf_k
+        ),
+        operations=CoreBankingRepository(pool),
+        incidents=IncidentRepository(pool),
+        system_prompt=prompt,
+        top_k=settings.retrieval_top_k,
+        tool_timeout_s=settings.tool_timeout_s,
+        max_tool_calls_per_turn=settings.max_tool_calls_per_turn,
+    )
+
+
 @dataclass(frozen=True)
 class Services:
     settings: Settings
@@ -117,21 +140,7 @@ async def open_services(
                 )
         graph: AgentGraph | None = None
         if llm is not None:
-            deps = AgentDeps(
-                llm=llm,
-                search=Retriever(
-                    pool,
-                    search_embedder,
-                    candidates=settings.retrieval_candidates,
-                    rrf_k=settings.rrf_k,
-                ),
-                operations=CoreBankingRepository(pool),
-                incidents=IncidentRepository(pool),
-                system_prompt=prompt,
-                top_k=settings.retrieval_top_k,
-                tool_timeout_s=settings.tool_timeout_s,
-                max_tool_calls_per_turn=settings.max_tool_calls_per_turn,
-            )
+            deps = agent_deps(settings, pool, search_embedder, llm, prompt)
             graph = build_graph(deps, checkpointer=checkpointer)
 
         async def readiness() -> dict[str, bool]:

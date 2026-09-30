@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs data lint format typecheck test check ingest ingest-local eval-retrieval eval eval-ablation
+.PHONY: help setup up down logs data lint format typecheck test check ingest ingest-local eval-retrieval eval eval-judge eval-ablation
 
 UV ?= uv
 
@@ -50,8 +50,11 @@ ingest-local: ## Same as ingest, but with the local uv environment (development)
 eval-retrieval: ## Retrieval-only eval (recall@5, MRR) for dense, bm25 and hybrid; no LLM calls
 	$(UV) run python -m evals.retrieval_eval --split dev
 
-eval: ## Run the evaluation harness (phase 4)
-	@echo "Not implemented yet: arrives in phase 4." && exit 1
+eval: ## Agent eval on dev with the real LLM (rate limited). Flags: make eval ARGS="--limit 3 --repeat 3"
+	$(UV) run python -m evals.agent_eval --split dev $(ARGS)
+
+eval-judge: ## Check the LLM judge against answers whose verdict is known (4 judge calls)
+	$(UV) run python -m evals.judge_controls
 
 eval-ablation: ## Run the retrieval-mode ablation (phase 6)
 	@echo "Not implemented yet: arrives in phase 6." && exit 1

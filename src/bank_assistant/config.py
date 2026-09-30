@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     agent_recursion_limit: int = Field(default=20, gt=0)
     request_timeout_s: float = Field(default=120.0, gt=0)
 
+    # --- Evaluation harness (evals/agent_eval.py) ---
+    # A stronger model than the agent's, from outside its size tier, to limit self-preference.
+    judge_model: str = "google_genai:gemini-3.5-flash"
+    judge_prompt_version: str = "v1"
+    # Client-side limit per model (agent and judge each get their own), under the free tier.
+    eval_requests_per_minute: float = Field(default=10.0, gt=0)
+    # Attempts per LLM call, first included: evals can afford to wait out a 429.
+    eval_llm_attempts: int = Field(default=6, gt=0)
+    eval_concurrency: int = Field(default=3, gt=0)
+
     @property
     def corpus_dir(self) -> Path:
         return self.data_dir / "corpus"

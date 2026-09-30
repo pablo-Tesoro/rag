@@ -35,6 +35,9 @@ class JsonFormatter(logging.Formatter):
 
 # Third-party loggers that are chatty at INFO (one line per HTTP request, model loading).
 NOISY_LOGGERS = ("httpx", "httpcore", "huggingface_hub", "sentence_transformers", "transformers")
+# Warns on every Gemini call that tool schemas lose `additionalProperties: false`. Harmless:
+# `extra="forbid"` is enforced by Pydantic when the tool arguments are validated.
+HARMLESS_WARNING_LOGGERS = ("langchain_google_genai._function_utils",)
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -45,6 +48,8 @@ def configure_logging(level: str = "INFO") -> None:
     root.setLevel(level.upper())
     for name in NOISY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+    for name in HARMLESS_WARNING_LOGGERS:
+        logging.getLogger(name).setLevel(logging.ERROR)
     # uvicorn installs its own plain-text handlers: route its logs through the JSON one.
     for name in ("uvicorn", "uvicorn.error"):
         uvicorn_logger = logging.getLogger(name)
