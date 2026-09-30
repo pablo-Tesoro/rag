@@ -11,7 +11,10 @@ dependencies = [
     "pydantic>=2.13,<3",
     "pydantic-settings>=2.15,<3",
     "pyyaml>=6.0,<7",
+    "sentence-transformers>=6.1,<7",
     "snowballstemmer>=3.0,<4",
+    # Direct dependency only so that [tool.uv.sources] can pin it to the CPU index.
+    "torch>=2.8",
 ]
 
 [dependency-groups]
@@ -33,6 +36,16 @@ build-backend = "uv_build"
 
 [tool.uv]
 default-groups = ["dev"]
+
+# CPU-only torch on Linux (Docker, CI): the default PyPI wheel bundles CUDA libraries
+# (several GB) that this project never uses. macOS keeps the regular PyPI wheel.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100
@@ -67,9 +80,8 @@ files = ["src", "tests", "scripts", "evals"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# No type information shipped. sentence_transformers is installed with the local-embeddings
-# stack (see docs/progreso.md).
-module = ["reportlab.*", "snowballstemmer", "sentence_transformers"]
+# No type information shipped.
+module = ["reportlab.*", "snowballstemmer"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

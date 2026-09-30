@@ -33,12 +33,18 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+# Third-party loggers that are chatty at INFO (one line per HTTP request, model loading).
+NOISY_LOGGERS = ("httpx", "httpcore", "huggingface_hub", "sentence_transformers", "transformers")
+
+
 def configure_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def pseudonymize(value: str, key: str) -> str:

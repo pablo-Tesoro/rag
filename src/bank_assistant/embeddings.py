@@ -7,6 +7,7 @@ prefixes and perform worse without them, so the prefixes are part of the configu
 """
 
 import math
+import os
 import re
 from collections.abc import Sequence
 from typing import Any, Protocol
@@ -46,6 +47,9 @@ class SentenceTransformerEmbedder:
         batch_size: int = 32,
     ) -> None:
         # Imported lazily: loading torch takes seconds and is only needed here.
+        # huggingface_hub sets its own log level on import; configure it via its env vars.
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+        os.environ.setdefault("HF_HUB_VERBOSITY", "error")
         from sentence_transformers import SentenceTransformer
 
         self._model_name = model_name
