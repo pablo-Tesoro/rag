@@ -57,7 +57,9 @@ integration"` runs only unit tests.
 - Retrieved content is delimited and treated as data, not instructions.
 - Writes (`abrir_incidencia`) require human approval and are idempotent.
 - Logs are JSON without personal data or free text; employee ids are HMAC-pseudonymised.
-- Never commit secrets: only `.env.example` is versioned.
+- Never commit secrets: only `.env.example` is versioned, with every credential left empty
+  (`tests/unit/test_env_example.py` enforces it). Real keys live in the local `.env` or in
+  the cloud environment settings.
 
 ## Data rules
 

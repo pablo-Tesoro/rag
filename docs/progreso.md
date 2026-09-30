@@ -71,11 +71,23 @@ Fase 3: agente LangGraph (estado tipado, tres herramientas, interrupt para la ap
 límites) y API FastAPI (`/chat`, `/healthz`, `/readyz`). Necesita `GOOGLE_API_KEY`, que se
 configuró en el entorno pero solo la ven las sesiones nuevas.
 
+## Incidente de seguridad (30/09/2026)
+
+- Se subió a la rama, desde GitHub, un commit (`e8a6d63`) que escribía una clave real de
+  `GOOGLE_API_KEY` en `.env.example`, en un repositorio público.
+- Respuesta: el commit se eliminó de la rama con un force-push aprobado por el propietario y
+  se añadió `tests/unit/test_env_example.py`, que falla si alguna credencial de
+  `.env.example` tiene valor.
+- La clave debe revocarse en Google AI Studio y sustituirse por una nueva, guardada solo en la
+  configuración del entorno o en el `.env` local. Borrarla de la historia no basta: estuvo
+  publicada.
+
 ## Acciones del propietario
 
 - ✅ Acceso de push a GitHub concedido.
 - ✅ Red abierta (Hugging Face, PyTorch, LangSmith).
-- ✅ `GOOGLE_API_KEY` configurada en el entorno (visible a partir de una sesión nueva).
+- ⚠️ Revocar la clave expuesta y crear una nueva en Google AI Studio; guardarla como
+  `GOOGLE_API_KEY` en la configuración del entorno (la leen las sesiones nuevas).
 - Opcional: `LANGSMITH_API_KEY` para las trazas de la fase 5.
 
 ## Notas del entorno en la nube
