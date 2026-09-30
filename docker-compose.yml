@@ -1,4 +1,3 @@
-# Phase 1: only the database. The app service is added in phase 3.
 services:
   db:
     image: pgvector/pgvector:0.8.6-pg17
@@ -16,5 +15,24 @@ services:
       timeout: 3s
       retries: 20
 
+  app:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Inside the compose network the database is "db", not localhost.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-olvessa}:${POSTGRES_PASSWORD:-olvessa-dev-only}@db:5432/${POSTGRES_DB:-olvessa}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      # Hugging Face cache: the embedding model is downloaded once and survives rebuilds.
+      - models:/models
+
 volumes:
   pgdata:
+  models:

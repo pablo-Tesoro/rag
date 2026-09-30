@@ -40,6 +40,21 @@ class Settings(BaseSettings):
     retrieval_candidates: int = Field(default=20, gt=0, description="Per-list depth before RRF.")
     rrf_k: int = Field(default=60, gt=0)
 
+    # --- LLM (any provider supported by init_chat_model: "provider:model") ---
+    llm_model: str = "google_genai:gemini-3.5-flash-lite"
+    llm_timeout_s: float = Field(default=30.0, gt=0)
+    llm_max_retries: int = Field(default=2, ge=0)
+    # None keeps the provider default (Google recommends not lowering it for Gemini 3).
+    llm_temperature: float | None = None
+
+    # --- Agent ---
+    prompts_dir: Path = Path("prompts")
+    prompt_version: str = "v1"
+    tool_timeout_s: float = Field(default=10.0, gt=0)
+    max_tool_calls_per_turn: int = Field(default=8, gt=0)
+    agent_recursion_limit: int = Field(default=20, gt=0)
+    request_timeout_s: float = Field(default=120.0, gt=0)
+
     @property
     def corpus_dir(self) -> Path:
         return self.data_dir / "corpus"

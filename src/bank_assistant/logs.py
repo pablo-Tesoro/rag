@@ -45,6 +45,17 @@ def configure_logging(level: str = "INFO") -> None:
     root.setLevel(level.upper())
     for name in NOISY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+    # uvicorn installs its own plain-text handlers: route its logs through the JSON one.
+    for name in ("uvicorn", "uvicorn.error"):
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
+    # The access log records client IPs (personal data): off, whatever the CLI flags say.
+    # The app logs its own pseudonymised event per chat turn instead.
+    access = logging.getLogger("uvicorn.access")
+    access.handlers.clear()
+    access.propagate = False
+    access.disabled = True
 
 
 def pseudonymize(value: str, key: str) -> str:

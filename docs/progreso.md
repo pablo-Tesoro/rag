@@ -8,7 +8,7 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 |---|---|---|
 | 1 | Esqueleto y datos | ✅ Terminada (dataset revisado y aprobado) |
 | 2 | Ingesta y recuperación | ✅ Terminada y verificada con el modelo real |
-| 3 | Agente y API (grafo LangGraph, herramientas, interrupt, FastAPI) | ⏳ Pendiente |
+| 3 | Agente y API | 🟡 Código, tests y Docker terminados; falta la prueba real con Gemini |
 | 4 | Evaluación (harness, métricas, puerta de calidad) | ⏳ Pendiente |
 | 5 | Trazas, Docker y CI | ⏳ Pendiente |
 | 6 | Ablación y README | ⏳ Pendiente |
@@ -65,11 +65,44 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
   diferencias orientativas.
 - El split de test no se ha ejecutado a propósito: se reserva para el informe final.
 
+## Fase 3: qué hay
+
+- `agent/graph.py`: `StateGraph` explícito con los nodos `agent`, `tools`, `approval` y
+  `finalize` (diagrama en el docstring).
+- `agent/schemas.py`: herramientas `buscar_normativa`, `consultar_operacion`,
+  `abrir_incidencia` y `responder`, validadas con Pydantic y con nombres y descripciones en
+  español.
+- Identidad en `AgentContext` (`context_schema`) y dueño del hilo en el estado.
+- Límites: `recursion_limit`, presupuesto de llamadas por turno, timeout por herramienta,
+  timeout y reintentos del LLM, timeout por petición y detección de llamadas repetidas.
+- Aprobación con `interrupt()` y escritura idempotente (`incidents`, clave
+  `sha256(thread:tool_call)`).
+- Citas validadas contra los chunks recuperados.
+- Contenido recuperado delimitado y escapado.
+- Prompt versionado: `prompts/agent_system/v1.md`; versión y hash van en los metadatos de
+  cada ejecución.
+- Core simulado (`core_operations`), incidencias y checkpointer `AsyncPostgresSaver` en el
+  mismo Postgres.
+- API: `POST /chat`, `POST /chat/{thread_id}/approval`, `GET /healthz`, `GET /readyz`. Sin
+  LLM configurado, la app arranca y `/readyz` y `/chat` responden 503 con el motivo.
+- Docker: imagen multi-stage con uv, usuario no root, healthcheck y caché de modelos en un
+  volumen. `make up` construye y levanta; `make ingest` carga los datos dentro del stack.
+- Tests: 119 en verde (unitarios con LLM falso y de integración contra Postgres, incluido el flujo
+  HTTP completo que sobrevive a un reinicio).
+- Verificado en el entorno en la nube: volúmenes borrados, `docker compose up`, ingesta
+  dentro del contenedor, `/healthz` 200 y `/readyz` 503 solo por falta de clave. Para
+  construir aquí hace falta la CA del proxy (override en el scratchpad, no en el repo); en
+  una máquina normal no.
+
 ## Siguiente paso
 
-Fase 3: agente LangGraph (estado tipado, tres herramientas, interrupt para la aprobación,
-límites) y API FastAPI (`/chat`, `/healthz`, `/readyz`). Necesita `GOOGLE_API_KEY`, que se
-configuró en el entorno pero solo la ven las sesiones nuevas.
+1. Prueba real con Gemini en cuanto la sesión vea `GOOGLE_API_KEY`:
+   - comprobar con `models.list` que `gemini-3.5-flash-lite` está en el tier gratuito
+     (si no, cambiar `LLM_MODEL`);
+   - hacer una pregunta de normativa, una de operación y el flujo de incidencia por
+     `curl`;
+   - ajustar el prompt si hace falta.
+2. Fase 4: harness de evaluación.
 
 ## Incidente de seguridad (30/09/2026)
 

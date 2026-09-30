@@ -128,7 +128,7 @@ def render_markdown(summary: dict[str, dict[str, Any]], config: dict[str, Any], 
 
 
 async def main_async(settings: Settings, args: argparse.Namespace) -> None:
-    from bank_assistant.cli import build_embedder  # heavy import (model), only when running
+    from bank_assistant.services import build_embedder  # loads the model: only when running
 
     cases = [
         c

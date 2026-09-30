@@ -5,6 +5,12 @@ description = "Agentic assistant for employees of Banco Olvessa (a fictitious ba
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi>=0.142,<1",
+    "langchain>=1.4,<2",
+    "langchain-core>=1.6,<2",
+    "langchain-google-genai>=4.4,<5",
+    "langgraph>=1.2,<2",
+    "langgraph-checkpoint-postgres>=3.1,<4",
     "pdfplumber>=0.11,<0.12",
     "psycopg-pool>=3.2,<4",
     "psycopg[binary]>=3.3,<4",
@@ -15,10 +21,12 @@ dependencies = [
     "snowballstemmer>=3.0,<4",
     # Direct dependency only so that [tool.uv.sources] can pin it to the CPU index.
     "torch>=2.8",
+    "uvicorn[standard]>=0.54,<1",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "mypy>=2.3",
     "pytest>=9.1",
     "pytest-asyncio>=1.4",

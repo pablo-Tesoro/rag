@@ -20,10 +20,11 @@ State of the work: `docs/progreso.md`. Design decisions: `docs/decisiones.md`.
 
 ```bash
 make setup      # uv sync --all-groups + .env from .env.example
-make up         # docker compose up -d --wait
+make up         # build and start db + app (docker compose), wait until healthy
 make check      # ruff + mypy (strict) + pytest — must be green before any commit
 make data       # regenerate PDFs and operations (deterministic)
-make ingest     # incremental ingestion of data/corpus (needs `make up`)
+make ingest     # load corpus (incremental) + core banking, inside the stack
+make ingest-local  # same, with the local uv environment
 make eval-retrieval  # recall@5 / MRR per retrieval mode, no LLM calls
 uv run python -m bank_assistant.cli search "pregunta" --employee EMP-001 --mode hybrid
 ```
@@ -34,7 +35,10 @@ integration"` runs only unit tests.
 
 ## Layout
 
-- `src/bank_assistant/` — application package (src layout).
+- `src/bank_assistant/` — application package (src layout): `ingestion/`, `retrieval/`,
+  `agent/` (graph, tools, schemas, guards), `api/`, `core_banking/`, `incidents/`,
+  `services.py` (wiring of real dependencies).
+- `prompts/` — versioned prompts (`<name>/<version>.md`).
 - `data/` — fictitious corpus, employees, core-banking data. See `data/README.md` for the
   deliberate hard cases and which eval category each one serves.
 - `evals/` — dataset, schema and (from phase 4) the harness. See `evals/README.md`.

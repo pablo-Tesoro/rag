@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup up down data lint format typecheck test check ingest eval-retrieval eval eval-ablation
+.PHONY: help setup up down logs data lint format typecheck test check ingest ingest-local eval-retrieval eval eval-ablation
 
 UV ?= uv
 
@@ -10,8 +10,11 @@ setup: ## Install Python deps with uv and create .env from .env.example if missi
 	$(UV) sync --all-groups
 	@test -f .env || (cp .env.example .env && echo "Created .env from .env.example")
 
-up: ## Start the stack with docker compose and wait until it is healthy
-	docker compose up -d --wait
+up: ## Build and start the stack (db + app) and wait until it is healthy
+	docker compose up -d --build --wait
+
+logs: ## Follow the app logs
+	docker compose logs -f app
 
 down: ## Stop the stack (data volume is kept)
 	docker compose down
@@ -36,8 +39,13 @@ test: ## Run the test suite
 
 check: lint typecheck test ## Everything CI runs
 
-ingest: ## Incrementally ingest data/corpus into Postgres (only changed documents)
+ingest: ## Load the fictitious data in the stack: corpus -> retrieval index (incremental), operations -> core banking
+	docker compose run --rm app python -m bank_assistant.cli ingest
+	docker compose run --rm app python -m bank_assistant.cli seed-core
+
+ingest-local: ## Same as ingest, but with the local uv environment (development)
 	$(UV) run python -m bank_assistant.cli ingest
+	$(UV) run python -m bank_assistant.cli seed-core
 
 eval-retrieval: ## Retrieval-only eval (recall@5, MRR) for dense, bm25 and hybrid; no LLM calls
 	$(UV) run python -m evals.retrieval_eval --split dev

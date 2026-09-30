@@ -1,6 +1,8 @@
--- Retrieval index. It is derived data: it can always be rebuilt from data/corpus with
--- `make ingest`, so schema changes are handled by re-ingesting, not by migrations.
--- Idempotent: safe to run on every start.
+-- Idempotent schema: safe to run on every start.
+--
+-- Retrieval index (documents, chunks, chunk_terms): derived data that can always be rebuilt
+-- from data/corpus with `make ingest`, so its schema changes are handled by re-ingesting.
+-- Incidents (end of file) are real data and would need proper migrations if they changed.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -44,3 +46,38 @@ CREATE TABLE IF NOT EXISTS chunk_terms (
 );
 
 CREATE INDEX IF NOT EXISTS chunk_terms_chunk_idx ON chunk_terms (chunk_id);
+
+-- ---------------------------------------------------------------------------------------
+-- Simulated core banking (fictitious operations, loaded from data/core_banking).
+-- In production this would be an external system reached with the employee's delegated
+-- token; here the office filter lives in the SQL query for the same reason.
+
+CREATE TABLE IF NOT EXISTS core_operations (
+    operation_id  text PRIMARY KEY CHECK (operation_id ~ '^OP-[0-9]{6}$'),
+    type          text NOT NULL,
+    status        text NOT NULL,
+    amount        numeric(14, 2) NOT NULL CHECK (amount > 0),
+    currency      char(3) NOT NULL,
+    office_id     text NOT NULL,
+    concept       text NOT NULL,
+    created_at    timestamptz NOT NULL,
+    updated_at    timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS core_operations_office_idx ON core_operations (office_id);
+
+-- ---------------------------------------------------------------------------------------
+-- Incidents opened by the assistant after human approval. Not derived data: never dropped
+-- by re-ingestion. The idempotency key makes a retried or replayed write a no-op.
+
+CREATE TABLE IF NOT EXISTS incidents (
+    id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    incident_number  text GENERATED ALWAYS AS ('INC-' || lpad(id::text, 6, '0')) STORED,
+    idempotency_key  text NOT NULL UNIQUE,
+    employee_id      text NOT NULL,
+    office_id        text NOT NULL,
+    operation_id     text NOT NULL,
+    category         text NOT NULL,
+    description      text NOT NULL,
+    created_at       timestamptz NOT NULL DEFAULT now()
+);

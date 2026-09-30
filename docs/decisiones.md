@@ -248,3 +248,130 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
 - **Trade-offs.** Todo queda en el lockfile y es reproducible, pero hay que poder llegar a
   `download.pytorch.org` para resolverlo. Torch CPU ocupa 187 MB. ONNX Runtime queda como
   optimización futura, si el arranque o la imagen pesan demasiado.
+
+## D-18. Grafo explícito de cuatro nodos en lugar de un agente prefabricado
+
+- **Contexto.** Hay que poder explicar cada paso y controlar validación, límites, aprobación
+  y formato de la respuesta.
+- **Alternativas.** `create_agent` de LangChain o `ToolNode` prebuilt: menos código, pero la
+  validación, los timeouts, la detección de bucles y la aprobación quedan dentro de
+  abstracciones ajenas.
+- **Elección.** Un `StateGraph` con cuatro nodos (`agent`, `tools`, `approval`, `finalize`) y
+  aristas condicionales, dibujado en el docstring de `agent/graph.py`. El LLM solo decide;
+  la ejecución, los permisos y la validación son código nuestro.
+- **Trade-offs.** Más código que mantener, a cambio de que cada garantía tenga un sitio
+  concreto y un test.
+
+## D-19. Respuesta final estructurada como herramienta `responder`
+
+- **Contexto.** La respuesta debe llevar texto, citas y un indicador de "sin evidencia".
+- **Alternativas.**
+  - Una llamada extra con `with_structured_output` al final: suma coste y latencia.
+  - Forzar la herramienta con `tool_choice`: algunos modelos actuales rechazan el uso
+    forzado de herramientas, lo que ataría el código a un proveedor.
+- **Elección.** `responder` es una herramienta más, con esquema Pydantic, y el prompt pide
+  terminar siempre con ella. Si el modelo contesta en texto libre, se acepta y se marca con
+  `terminacion: "texto_libre"`, para verlo en las evals.
+- **Trade-offs.** El modelo puede saltarse la herramienta; en lugar de ocultarlo, se mide.
+
+## D-20. Las citas se validan por código contra lo recuperado
+
+- **Contexto.** Un modelo puede citar un documento que no ha leído.
+- **Elección.**
+  - El estado guarda los chunks recuperados en el hilo.
+  - Una cita es válida si su documento y sección, o una sección padre o hija, están entre
+    ellos.
+  - Si hay citas inválidas, la respuesta vuelve al modelo una vez; si persisten, se
+    descartan y quedan registradas en `citas_descartadas`.
+  - Con `sin_evidencia`, las citas se vacían.
+- **Trade-offs.** Solo comprueba que la fuente se leyó, no que la afirmación esté en ella.
+  Eso lo mide el juez de las evals.
+
+## D-21. Aprobación humana con `interrupt()` y escritura idempotente
+
+- **Contexto.** Abrir una incidencia es una escritura. LangGraph reejecuta desde el principio
+  el nodo que se reanuda, y un proceso puede caerse entre escribir en la base de datos y
+  guardar el checkpoint.
+- **Elección.**
+  - En el nodo `approval`, antes del `interrupt()`, solo hay lecturas: validar argumentos,
+    comprobar que la operación es de la oficina y no repetir una propuesta ya hecha.
+  - La escritura va después del `interrupt()`, con clave
+    `sha256(thread_id:tool_call_id)` y `ON CONFLICT DO NOTHING`.
+  - Solo se propone una incidencia a la vez.
+  - Un test simula una caída justo después de escribir y comprueba que al reanudar se crea
+    una única incidencia.
+- **Trade-offs.** El `tool_call_id` lo genera la integración del proveedor; es estable
+  porque se guarda en el checkpoint.
+
+## D-22. Identidad en el contexto de ejecución y propiedad del hilo
+
+- **Contexto.** El modelo no debe poder elegir en nombre de quién actúa, y un empleado no
+  debe poder continuar ni aprobar la conversación de otro.
+- **Elección.**
+  - La cabecera se convierte en un `Employee` y viaja en el `context_schema` de LangGraph en
+    cada invocación; no se persiste ni lo ve el modelo como argumento.
+  - Los esquemas de las herramientas prohíben campos extra: un argumento `oficina` es un
+    error de validación.
+  - El estado guarda el dueño del hilo, y la API responde 404 a cualquier otro empleado,
+    igual que si el hilo no existiera.
+- **Trade-offs.** Sin autenticación real, la cabecera es de confianza (ver D-06).
+
+## D-23. Límites del bucle derivados del historial
+
+- **Contexto.** Un agente puede entrar en bucle o colgarse esperando a una herramienta.
+- **Elección.**
+  - `recursion_limit` del grafo.
+  - Un presupuesto de llamadas a herramientas por turno.
+  - Timeout por herramienta con `asyncio.wait_for`.
+  - Timeout y reintentos del cliente del LLM.
+  - Timeout global por petición en la API.
+  - Detección de llamadas repetidas (misma herramienta y mismos argumentos canónicos).
+  - Contadores y detección se calculan a partir de los mensajes del turno actual, así que no
+    añaden estado.
+  - Cada error vuelve al modelo como mensaje de herramienta con una indicación de qué
+    corregir.
+- **Trade-offs.** Un turno cortado por el presupuesto termina con una respuesta de "no he
+  podido completar la consulta". Es explícito, pero puede frustrar en preguntas legítimas
+  largas; el presupuesto es configurable.
+
+## D-24. Checkpointer de LangGraph en el mismo Postgres
+
+- **Contexto.** Las conversaciones y las aprobaciones pendientes deben sobrevivir a un
+  reinicio.
+- **Alternativas.** Redis o SQLite: otra pieza de infraestructura, o nada de concurrencia.
+- **Elección.** `AsyncPostgresSaver` en el mismo Postgres, con un pool propio en modo
+  autocommit y sin prepared statements, como pide la librería. Un test de integración pausa
+  una aprobación, levanta una instancia nueva de la app y la reanuda.
+- **Trade-offs.** Un único Postgres concentra índice, core simulado, incidencias y
+  checkpoints: sencillo de operar, pero es un único punto de fallo.
+
+## D-25. Liveness frente a readiness, y arranque sin LLM
+
+- **Contexto.** Sin clave del LLM, el cliente falla al crearse. Si eso tumba la app, el
+  contenedor entra en bucle de reinicios y el error queda enterrado.
+- **Elección.**
+  - La app arranca igualmente: `/healthz` responde (el proceso vive).
+  - `/readyz` devuelve 503 con el detalle de cada comprobación: base de datos, índice
+    cargado, core cargado y LLM configurado.
+  - `/chat` responde 503 con un motivo claro, sin volcar el error interno.
+- **Trade-offs.** El orquestador debe usar `/readyz` para enrutar tráfico; el healthcheck de
+  Docker usa `/healthz`.
+
+## D-26. Temperatura por defecto del proveedor
+
+- **Contexto.** La costumbre es fijar temperatura 0 para tener reproducibilidad.
+- **Elección.** No se fija por defecto (`LLM_TEMPERATURE` es opcional). La integración de
+  Gemini documenta, citando las buenas prácticas de Google, que bajar la temperatura en
+  Gemini 3 puede provocar bucles y peor razonamiento. En `gemini-3.5-flash-lite` el muestreo
+  es además fijo y la temperatura se ignora.
+- **Trade-offs.** Las respuestas no son deterministas. Por eso las evals miden la
+  consistencia con `--repeat k` (pass^k) en lugar de suponerla.
+
+## D-27. Logs sin access log
+
+- **Contexto.** El access log de uvicorn registra la IP del cliente, un dato personal.
+- **Elección.** Se desactiva en código, sea cual sea el flag de arranque. La app registra un
+  evento `chat.turn` por petición con el empleado seudonimizado, el estado, la latencia y
+  el número de herramientas usadas. Los logs de uvicorn pasan por el mismo formateador JSON.
+- **Trade-offs.** No hay registro por petición de `/healthz` ni de `/readyz`; para eso están
+  las métricas del orquestador.

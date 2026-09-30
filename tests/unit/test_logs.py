@@ -1,7 +1,7 @@
 import json
 import logging
 
-from bank_assistant.logs import JsonFormatter, pseudonymize
+from bank_assistant.logs import JsonFormatter, configure_logging, pseudonymize
 
 
 def _record(message: str, **extra: object) -> logging.LogRecord:
@@ -32,3 +32,9 @@ def test_pseudonymize_is_stable_keyed_and_not_the_raw_id() -> None:
     assert ref == pseudonymize("EMP-001", key="k1")
     assert ref != pseudonymize("EMP-001", key="k2")
     assert "EMP-001" not in ref
+
+
+def test_access_log_with_client_ips_is_disabled() -> None:
+    configure_logging("INFO")
+
+    assert logging.getLogger("uvicorn.access").disabled is True

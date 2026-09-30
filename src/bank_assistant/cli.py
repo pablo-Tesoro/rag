@@ -1,6 +1,7 @@
 """Command-line entry points.
 
 python -m bank_assistant.cli ingest
+python -m bank_assistant.cli seed-core
 python -m bank_assistant.cli search "¿Cuál es el límite diario...?" --employee EMP-001
 """
 
@@ -14,36 +15,17 @@ from dataclasses import asdict
 from psycopg import AsyncConnection
 
 from bank_assistant.config import Settings, get_settings
+from bank_assistant.core_banking.models import load_operations
+from bank_assistant.core_banking.repository import CoreBankingRepository
 from bank_assistant.db import apply_schema, open_pool
-from bank_assistant.embeddings import SentenceTransformerEmbedder
 from bank_assistant.identity import EmployeeDirectory
-from bank_assistant.ingestion.chunking import ChunkConfig
 from bank_assistant.ingestion.pipeline import ingest_corpus
 from bank_assistant.logs import configure_logging
 from bank_assistant.retrieval import RetrievalMode
 from bank_assistant.retrieval.retriever import Retriever
+from bank_assistant.services import build_embedder, chunk_config
 
 log = logging.getLogger(__name__)
-
-
-def build_embedder(settings: Settings) -> SentenceTransformerEmbedder:
-    embedder = SentenceTransformerEmbedder(
-        settings.embedding_model,
-        query_prefix=settings.embedding_query_prefix,
-        document_prefix=settings.embedding_document_prefix,
-    )
-    if settings.chunk_max_tokens > embedder.max_tokens:
-        raise ValueError(
-            f"CHUNK_MAX_TOKENS={settings.chunk_max_tokens} exceeds the model window "
-            f"({embedder.max_tokens}); chunks would be truncated when embedded."
-        )
-    return embedder
-
-
-def chunk_config(settings: Settings) -> ChunkConfig:
-    return ChunkConfig(
-        max_tokens=settings.chunk_max_tokens, overlap_tokens=settings.chunk_overlap_tokens
-    )
 
 
 async def run_ingest(settings: Settings) -> int:
@@ -52,6 +34,19 @@ async def run_ingest(settings: Settings) -> int:
         await apply_schema(conn)
         report = await ingest_corpus(conn, settings.corpus_dir, embedder, chunk_config(settings))
     print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
+    return 0
+
+
+async def run_seed_core(settings: Settings) -> int:
+    operations = load_operations(settings.operations_file)
+    pool = await open_pool(settings.database_url)
+    try:
+        async with pool.connection() as conn:
+            await apply_schema(conn)
+        loaded = await CoreBankingRepository(pool).load(operations)
+    finally:
+        await pool.close()
+    print(json.dumps({"core_operations_loaded": loaded}))
     return 0
 
 
@@ -92,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("ingest", help="Incrementally ingest data/corpus into Postgres")
+    commands.add_parser("seed-core", help="Load the fictitious operations into the core banking")
 
     search = commands.add_parser("search", help="Run the retriever as a given employee")
     search.add_argument("query")
@@ -105,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "ingest":
         return asyncio.run(run_ingest(settings))
+    if args.command == "seed-core":
+        return asyncio.run(run_seed_core(settings))
     return asyncio.run(run_search(settings, args))
 
 
