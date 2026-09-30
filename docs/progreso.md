@@ -129,3 +129,18 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
   `make up`.
 - El aviso `UV_NATIVE_TLS is deprecated` lo provoca la configuración del proxy; es inofensivo.
 - `docs.langchain.com` está bloqueado: la doc oficial se lee en `github.com/langchain-ai/docs`.
+- Docker en el entorno en la nube: el proxy intercepta HTTPS con su propia CA, así que
+  `make up` falla al construir. No hay que cambiar el Dockerfile del repo; se construye con
+  una variante temporal fuera del repo:
+  ```bash
+  SP=/tmp  # cualquier carpeta fuera del repo
+  sed 's#^RUN --mount=type=cache,target=/root/.cache/uv \\#RUN --mount=type=cache,target=/root/.cache/uv --mount=type=secret,id=proxyca,target=/tmp/proxy-ca.crt SSL_CERT_FILE=/tmp/proxy-ca.crt \\#' Dockerfile > $SP/Dockerfile.sandbox
+  DOCKER_BUILDKIT=1 docker build --network host --secret id=proxyca,src=/root/.ccr/ca-bundle.crt \
+    --build-arg HTTPS_PROXY=$HTTPS_PROXY -f $SP/Dockerfile.sandbox -t rag-app:latest .
+  ```
+  Y un override de compose (`$SP/docker-compose.sandbox.yml`) para el servicio `app`:
+  `image: rag-app:latest`, `build: !reset null`, `network_mode: host`, `ports: !reset []`,
+  `DATABASE_URL` apuntando a `127.0.0.1:5432`, las variables `HTTPS_PROXY`/`HTTP_PROXY`,
+  `NO_PROXY=localhost,127.0.0.1`, `SSL_CERT_FILE` y `REQUESTS_CA_BUNDLE=/proxy-ca.crt`, y
+  el volumen `/root/.ccr/ca-bundle.crt:/proxy-ca.crt:ro`. Se usa con
+  `docker compose -f docker-compose.yml -f $SP/docker-compose.sandbox.yml ...`.
