@@ -7,7 +7,7 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 | Fase | Contenido | Estado |
 |---|---|---|
 | 1 | Esqueleto y datos | ✅ Terminada (dataset revisado y aprobado) |
-| 2 | Ingesta y recuperación | 🟡 Código y tests terminados; falta la verificación con el modelo real |
+| 2 | Ingesta y recuperación | ✅ Terminada y verificada con el modelo real |
 | 3 | Agente y API (grafo LangGraph, herramientas, interrupt, FastAPI) | ⏳ Pendiente |
 | 4 | Evaluación (harness, métricas, puerta de calidad) | ⏳ Pendiente |
 | 5 | Trazas, Docker y CI | ⏳ Pendiente |
@@ -42,40 +42,41 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
   falso determinista. Incluyen la comparación del BM25 en SQL con una referencia en Python
   y pruebas de mutación manuales de los filtros de permisos.
 
-## Pendiente para cerrar la fase 2 (necesita la red nueva, en una sesión nueva)
+## Fase 2: verificación con el modelo real
 
-La sesión en la que se escribió la fase 2 no tenía acceso a `huggingface.co` ni a
-`download.pytorch.org`: los cambios de red del entorno solo se aplican a sesiones nuevas.
+- `sentence-transformers` con torch solo CPU en Linux (índice `pytorch-cpu` en
+  `pyproject.toml`; torch se declara como dependencia directa porque `[tool.uv.sources]` solo
+  se aplica a dependencias directas). Torch CPU ocupa 187 MB frente a varios GB con CUDA.
+- `make ingest`: 13 documentos y 67 chunks (máximo 369 tokens con el tokenizador de
+  e5-small, medio 136) en unos 35 s con la descarga del modelo; una segunda ejecución no
+  reprocesa nada.
+- `make eval-retrieval` sobre dev (13 casos con evidencia etiquetada), commit `591c4a1`,
+  resultado en `evals/results/20260930T175343Z_retrieval_dev.*`:
 
-1. Añadir la pila de embeddings locales con torch solo CPU en Linux. En `pyproject.toml`:
-   ```toml
-   dependencies = [..., "sentence-transformers>=6.1,<7"]
+  | Modo | Recall@5 | MRR@10 |
+  |---|---|---|
+  | dense | 0.872 | 0.904 |
+  | bm25 | 0.923 | 0.938 |
+  | hybrid | 0.962 | 0.910 |
 
-   [tool.uv.sources]
-   torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+  La búsqueda densa falla en códigos exactos y en preguntas de varios saltos; BM25 falla
+  cuando la pregunta no comparte palabras con la respuesta (FAC-02). Solo hybrid encuentra
+  las dos piezas de MUL-01. Con 13 casos, un caso equivale a unos 0,08 de recall: son
+  diferencias orientativas.
+- El split de test no se ha ejecutado a propósito: se reserva para el informe final.
 
-   [[tool.uv.index]]
-   name = "pytorch-cpu"
-   url = "https://download.pytorch.org/whl/cpu"
-   explicit = true
-   ```
-   Después, `uv lock` y quitar `sentence_transformers` de las excepciones de mypy si trae
-   tipos.
-2. `make up && make ingest`: comprobar que descarga e5-small, ingesta 13 documentos y que una
-   segunda ejecución no reprocesa nada.
-3. Revisar con `uv run python -m bank_assistant.cli search "..." --employee EMP-001` que los
-   resultados tienen sentido.
-4. `make eval-retrieval`: primera tabla real de recall@5 y MRR por modo, guardada en
-   `evals/results/`. Estas son las primeras cifras que pueden citarse.
-5. Commit y resumen de la fase 2 al propietario.
+## Siguiente paso
+
+Fase 3: agente LangGraph (estado tipado, tres herramientas, interrupt para la aprobación,
+límites) y API FastAPI (`/chat`, `/healthz`, `/readyz`). Necesita `GOOGLE_API_KEY`, que se
+configuró en el entorno pero solo la ven las sesiones nuevas.
 
 ## Acciones del propietario
 
 - ✅ Acceso de push a GitHub concedido.
-- Clave gratuita de Google AI Studio como `GOOGLE_API_KEY` en la configuración del entorno
-  (no en el chat). Necesaria en la fase 3.
-- Red: `huggingface.co` con sus CDN (`*.hf.co`, `cdn-lfs.huggingface.co`) y
-  `download.pytorch.org`. Opcional: `api.smith.langchain.com` y `LANGSMITH_API_KEY`.
+- ✅ Red abierta (Hugging Face, PyTorch, LangSmith).
+- ✅ `GOOGLE_API_KEY` configurada en el entorno (visible a partir de una sesión nueva).
+- Opcional: `LANGSMITH_API_KEY` para las trazas de la fase 5.
 
 ## Notas del entorno en la nube
 

@@ -229,3 +229,22 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
 - **Trade-offs.** La pregunta cruda no es la consulta que haría el agente (que puede
   reformularla o descomponerla en varios saltos), así que el recall de esta evaluación es una
   cota prudente, no el comportamiento final.
+
+## D-17. Torch solo CPU desde el índice oficial de PyTorch
+
+- **Contexto.** sentence-transformers depende de torch, y la rueda de PyPI para Linux trae
+  varios GB de librerías CUDA que este proyecto nunca usa: imagen Docker enorme e
+  instalación lenta en CI.
+- **Alternativas.**
+  - Aceptar la rueda con CUDA.
+  - Instalar torch aparte en el Dockerfile, fuera del lockfile, con el riesgo de que las
+    versiones diverjan.
+  - Prescindir de torch y usar ONNX Runtime (fastembed), lo que cambiaría la librería
+    pedida.
+- **Elección.** Un índice explícito `pytorch-cpu` en `pyproject.toml` con
+  `marker = "sys_platform == 'linux'"`. torch se declara como dependencia directa, porque
+  uv solo aplica `[tool.uv.sources]` a dependencias directas. macOS sigue usando la rueda
+  de PyPI.
+- **Trade-offs.** Todo queda en el lockfile y es reproducible, pero hay que poder llegar a
+  `download.pytorch.org` para resolverlo. Torch CPU ocupa 187 MB. ONNX Runtime queda como
+  optimización futura, si el arranque o la imagen pesan demasiado.
