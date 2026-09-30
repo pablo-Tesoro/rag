@@ -23,9 +23,14 @@ make setup      # uv sync --all-groups + .env from .env.example
 make up         # docker compose up -d --wait
 make check      # ruff + mypy (strict) + pytest — must be green before any commit
 make data       # regenerate PDFs and operations (deterministic)
+make ingest     # incremental ingestion of data/corpus (needs `make up`)
+make eval-retrieval  # recall@5 / MRR per retrieval mode, no LLM calls
+uv run python -m bank_assistant.cli search "pregunta" --employee EMP-001 --mode hybrid
 ```
 
-`uv run pytest -m "not integration"` skips tests that need Postgres.
+Integration tests (`tests/integration`) run against the compose Postgres in an isolated
+schema per module and are skipped if it is not reachable; `uv run pytest -m "not
+integration"` runs only unit tests.
 
 ## Layout
 

@@ -124,3 +124,108 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
 - **Trade-offs.** Un hash sin clave no bastaría: los ids vienen de un espacio pequeño y se
   podrían revertir por fuerza bruta. Con HMAC, depurar un caso concreto obliga a pasar por
   las trazas, que es lo deseable.
+
+## D-11. Chunking por estructura, medido en tokens del modelo de embeddings
+
+- **Contexto.** Un chunking de tamaño fijo parte tablas por la mitad, mezcla secciones y
+  genera citas imprecisas.
+- **Alternativas.** Tamaño fijo con solapamiento; chunking semántico por similitud entre
+  frases; un chunk por documento.
+- **Elección.**
+  - Un chunk nunca cruza una sección: cada chunk tiene una única etiqueta
+    `(documento, sección)`.
+  - Los bloques (párrafos y tablas) se empaquetan hasta 380 tokens contados con el tokenizador
+    del propio modelo (e5-small admite 512).
+  - Las tablas van enteras; solo una tabla que no cabe se parte por filas, repitiendo la
+    cabecera.
+  - Si la prosa sigue en otro chunk de la misma sección, este empieza con las últimas frases
+    del anterior (unos 60 tokens de solapamiento).
+  - Cada chunk lleva una cabecera con título, id, versión, estado y ruta de secciones, que
+    se indexa pero no se cita.
+- **Trade-offs.** Hay chunks muy cortos (secciones de dos frases), con menos contexto para el
+  embedding; la cabecera lo compensa. Medir con el tokenizador del modelo evita que el
+  embedding trunque texto sin avisar.
+
+## D-12. BM25 implementado en SQL sobre un índice invertido
+
+- **Contexto.** La búsqueda léxica es imprescindible para los códigos exactos, y los filtros
+  de permisos y de vigencia deben aplicarse en la consulta a la base de datos.
+- **Alternativas.**
+  - `rank_bm25` en memoria: filtraría en Python, el índice podría quedar desincronizado con
+    la base de datos y las estadísticas IDF incluirían documentos restringidos.
+  - Búsqueda de texto completo de Postgres (`ts_rank`): no es BM25 (no satura la frecuencia
+    ni normaliza por longitud igual) y su analizador parte los códigos por los guiones.
+  - ParadeDB `pg_search`: BM25 real en Postgres, pero exige otra imagen y tiene licencia AGPL.
+- **Elección.**
+  - Una tabla `chunk_terms(term, chunk_id, tf)` y una consulta SQL con la fórmula de Okapi
+    BM25 (k1 = 1,2, b = 0,75).
+  - Las estadísticas (N, longitud media, df) se calculan solo sobre los chunks visibles para
+    el empleado.
+  - El analizador léxico es propio: mantiene enteros códigos y números, aplica el stemmer
+    Snowball de español, quita tildes y elimina palabras vacías.
+  - Un test compara la puntuación de la consulta SQL con una implementación de referencia en
+    Python.
+- **Trade-offs.** Calcular las estadísticas en cada consulta no escala a millones de
+  documentos; ahí se usaría ParadeDB, OpenSearch o Elasticsearch. A cambio, hay una sola
+  fuente de verdad, transaccional con la ingesta, y los filtros van en el mismo `WHERE` que la
+  búsqueda densa.
+
+## D-13. Fusión con Reciprocal Rank Fusion
+
+- **Contexto.** El modo híbrido combina dos listas cuyas puntuaciones no son comparables:
+  BM25 no tiene cota y el coseno está en [-1, 1].
+- **Alternativas.** Normalizar las puntuaciones (min-max) y sumarlas con pesos: depende de la
+  distribución de cada consulta y obliga a ajustar los pesos.
+- **Elección.** RRF con k = 60 (el valor del artículo original), sobre los 20 primeros de cada
+  lista. Los empates se resuelven de forma determinista.
+- **Trade-offs.** Ignora cuánto mejor es el primero que el segundo; solo cuenta posiciones.
+  Es robusto y no tiene nada que ajustar, que con 30 casos de evaluación es una virtud.
+
+## D-14. Embeddings locales con multilingual-e5-small y búsqueda exacta
+
+- **Contexto.** Hace falta un modelo multilingüe pequeño, gratuito y que funcione en CPU.
+- **Alternativas.**
+  - `paraphrase-multilingual-MiniLM-L12-v2`: más antiguo y con una ventana de solo 128 tokens.
+  - `bge-m3`: mejor calidad, pero 568M parámetros, demasiado para CPU.
+  - Embeddings por API: coste y dependencia de red.
+- **Elección.**
+  - `intfloat/multilingual-e5-small` (384 dimensiones, 512 tokens, licencia MIT), con los
+    prefijos `query:` y `passage:` con los que se entrenó.
+  - Vectores normalizados.
+  - En Postgres, una columna `vector` sin dimensión fija (el modelo es configurable) y
+    búsqueda exacta sin índice ANN.
+- **Trade-offs.** Con unos 70 chunks, la búsqueda exacta es más rápida y precisa que un
+  índice aproximado. Con miles de chunks habría que crear un índice HNSW con la dimensión
+  fija y tener cuidado con los filtros: la búsqueda iterativa de pgvector 0.8 evita que el
+  filtro deje menos de k resultados.
+
+## D-15. Ingesta incremental con huella del índice
+
+- **Contexto.** Reprocesar todo en cada ingesta es lento, y no reprocesar nada al cambiar el
+  chunking deja un índice incoherente.
+- **Alternativas.** Reindexar todo siempre; comparar fechas de modificación, que cambian al
+  clonar el repositorio.
+- **Elección.**
+  - `content_hash = sha256(huella del índice + bytes del fichero [+ sidecar del PDF])`.
+  - La huella incluye la versión del chunker, sus límites, la versión del analizador léxico
+    y el modelo de embeddings: cambiar cualquiera de ellos reprocesa todo sin un comando
+    aparte.
+  - Cada documento se sustituye en su propia transacción.
+  - Los documentos que desaparecen del corpus se borran en cascada.
+  - Un advisory lock de Postgres impide dos ingestas simultáneas.
+- **Trade-offs.** Un cambio de una letra reprocesa el documento entero, no solo el chunk
+  afectado. Con documentos de este tamaño es irrelevante, y evita tener que casar chunks
+  antiguos con nuevos.
+
+## D-16. Evaluación de la recuperación separada de la del agente
+
+- **Contexto.** Si el agente responde mal, hay que saber si falló la búsqueda o el modelo.
+- **Elección.**
+  - `evals/retrieval_eval.py` lanza la pregunta tal cual con los permisos del empleado del
+    caso y calcula recall@5 y MRR@10 por modo, sin llamar al LLM: es gratis y determinista.
+  - La ablación de modos de recuperación sale de aquí sin gastar cuota del tier gratuito.
+  - El harness de la fase 4 medirá además lo que el agente recupera realmente con sus
+    propias consultas.
+- **Trade-offs.** La pregunta cruda no es la consulta que haría el agente (que puede
+  reformularla o descomponerla en varios saltos), así que el recall de esta evaluación es una
+  cota prudente, no el comportamiento final.

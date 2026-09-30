@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup up down data lint format typecheck test check ingest eval eval-ablation
+.PHONY: help setup up down data lint format typecheck test check ingest eval-retrieval eval eval-ablation
 
 UV ?= uv
 
@@ -36,8 +36,11 @@ test: ## Run the test suite
 
 check: lint typecheck test ## Everything CI runs
 
-ingest: ## Ingest the corpus into Postgres (phase 2)
-	@echo "Not implemented yet: arrives in phase 2." && exit 1
+ingest: ## Incrementally ingest data/corpus into Postgres (only changed documents)
+	$(UV) run python -m bank_assistant.cli ingest
+
+eval-retrieval: ## Retrieval-only eval (recall@5, MRR) for dense, bm25 and hybrid; no LLM calls
+	$(UV) run python -m evals.retrieval_eval --split dev
 
 eval: ## Run the evaluation harness (phase 4)
 	@echo "Not implemented yet: arrives in phase 4." && exit 1

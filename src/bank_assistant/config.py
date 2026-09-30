@@ -10,6 +10,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from bank_assistant.retrieval import RetrievalMode
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -22,6 +24,21 @@ class Settings(BaseSettings):
         default=Path("data"),
         description="Root of the fictitious data (corpus, employees, core banking).",
     )
+
+    # --- Embeddings (local, CPU) ---
+    embedding_model: str = "intfloat/multilingual-e5-small"
+    embedding_query_prefix: str = "query: "
+    embedding_document_prefix: str = "passage: "
+
+    # --- Chunking ---
+    chunk_max_tokens: int = Field(default=380, gt=0)
+    chunk_overlap_tokens: int = Field(default=60, ge=0)
+
+    # --- Retrieval ---
+    retrieval_mode: RetrievalMode = RetrievalMode.HYBRID
+    retrieval_top_k: int = Field(default=5, gt=0)
+    retrieval_candidates: int = Field(default=20, gt=0, description="Per-list depth before RRF.")
+    rrf_k: int = Field(default=60, gt=0)
 
     @property
     def corpus_dir(self) -> Path:
