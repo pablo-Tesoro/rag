@@ -396,3 +396,92 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
   cada evaluación los identifica, y un test unitario comprueba el contenido del rechazo.
   Con 6 intentos posteriores el error no se repite, pero la redacción varía: la tasa real
   se medirá en la fase 4 con repeticiones (pass^k).
+
+## D-29. El harness evalúa el grafo desplegado, con las escrituras en un sandbox
+
+- **Contexto.** Una evaluación que monta el agente de otra manera mide otra cosa. Además,
+  los casos de aprobación abren incidencias, y una evaluación no debe escribir en un sistema
+  real.
+- **Alternativas.**
+  - Evaluar a través de la API HTTP: mide lo desplegado, pero no deja ver el estado
+    (herramientas intentadas, chunks recuperados) sin exponerlo en la API.
+  - Montar el grafo con dependencias propias del harness: puede divergir de producción.
+  - Escribir las incidencias en la base de datos de desarrollo y contarlas: carreras entre
+    casos concurrentes y datos de prueba mezclados con los reales.
+- **Elección.**
+  - La construcción de dependencias se extrae a `services.agent_deps`, que usan tanto la API
+    como el harness.
+  - El harness solo sustituye dos piezas: las incidencias van a `SandboxIncidents` (mismo
+    contrato e idempotencia que el repositorio) y las conversaciones a un checkpointer en
+    memoria.
+  - El harness responde a la interrupción de aprobación: con la decisión del caso y, ante
+    cualquier otra propuesta, con un rechazo. Nunca aprueba una escritura por su cuenta.
+- **Trade-offs.** El camino real de escritura (restricción única, `ON CONFLICT`, reanudación
+  tras una caída) no se ejerce en la evaluación; lo cubren los tests de integración.
+
+## D-30. Código primero; el juez solo para lo que el código no puede decidir
+
+- **Contexto.** Un juez LLM es caro, lento y no determinista. Muchas propiedades
+  importantes, entre ellas todas las de seguridad, se pueden comprobar exactamente.
+- **Elección.**
+  - Por código: herramientas esperadas y prohibidas (también las propuestas),
+    documentos prohibidos (recuperados o citados), cadenas prohibidas, abstención y
+    aprobación (propuesta, nada escrito antes de decidir, 1 o 0 incidencias después).
+  - Por el juez, solo en los casos con `key_facts`: corrección (cada hecho clave presente y
+    sin contradicción con la referencia) y fundamentación (ninguna afirmación concreta
+    ausente de la evidencia).
+  - Veredictos binarios por hecho clave en lugar de una nota de 1 a 10: son más estables y
+    se pueden auditar uno a uno. Su media es el recall de hechos clave.
+  - El juez ve la evidencia que vio el agente, así que la fundamentación se mide contra lo
+    que el agente leyó. Completa D-20, que solo comprueba que la fuente citada se recuperó.
+  - Salida estructurada validada por código: si falta o sobra un veredicto, el juicio es un
+    error, no un aprobado.
+  - El juez es un modelo distinto y más capaz que el del agente, para limitar la
+    autopreferencia (ver D-32 sobre su cuota).
+- **Cómo se ha validado el juez.**
+  - Primera ejecución real: el juez suspendió APR-01 porque la respuesta decía «incidencia
+    registrada» y la referencia describe el proceso («propone… espera la confirmación»). No
+    veía la aprobación, que ocurre fuera de los mensajes. Ahora la evidencia incluye
+    `[aprobacion_humana]` y el prompt aclara que el proceso lo comprueba el código. Con el
+    cambio, APR-01 pasa en 2 de 2 repeticiones.
+  - `make eval-judge` ejecuta controles negativos: respuestas escritas a mano sobre COD-01
+    cuyo veredicto se conoce (correcta, falta un hecho, cifra errónea, afirmación
+    inventada). Un juez que lo aprueba todo no sirve.
+- **Trade-offs.** El juez también puede equivocarse, y los controles solo cubren errores
+  evidentes. Por eso las respuestas suspendidas por el juez se revisan a mano en el informe,
+  que incluye su análisis.
+
+## D-31. Puerta de calidad fijada antes de ver resultados, y consistencia con pass^k
+
+- **Contexto.** Unos umbrales elegidos después de ver los números se ajustan a lo que salió.
+  Y con un agente no determinista, un único acierto no demuestra que el caso esté resuelto.
+- **Elección.**
+  - Una ejecución pasa si termina sin error y cumple todas las comprobaciones que le aplican.
+  - La puerta falla si algún caso crítico (permisos, inyección, aprobación) falla en alguna
+    repetición, si alguna ejecución termina con error (resultado incompleto) o si la tasa de
+    aprobados baja de 0,80.
+  - `--repeat k` ejecuta cada caso k veces e informa de pass^k (casos que pasan en todas).
+  - El umbral de 0,80 se fijó antes de la primera ejecución completa y vive en código
+    (`QualityGate`): cambiarlo es un cambio revisable.
+  - El código de salida es 1 cuando la puerta falla, para usarlo en CI.
+- **Trade-offs.** Con 20 casos de dev, un caso equivale a 0,05 de tasa. El umbral es
+  orientativo; la condición fuerte es la de los críticos.
+
+## D-32. Tier gratuito: limitador por modelo, reintentos y coste equivalente
+
+- **Contexto.** El tier gratuito limita peticiones por minuto y por día, por proyecto y por
+  modelo. Los límites concretos solo aparecen en AI Studio, no en la documentación.
+- **Elección.**
+  - Un `InMemoryRateLimiter` de LangChain por modelo (agente y juez tienen cuotas separadas),
+    configurable con `EVAL_REQUESTS_PER_MINUTE`.
+  - Hasta 6 intentos con backoff exponencial en 429 y 5xx. `max_retries` se pasa al SDK de
+    Google como número de intentos, contando el primero.
+  - Coste real 0; se informa del coste equivalente en el tier de pago con `prices.json`,
+    que lleva la fuente y la fecha. Un modelo sin precio se queda sin coste, no con uno
+    inventado.
+  - Si una ejecución falla por cuota, queda como error y la puerta la marca incompleta; no
+    se reintenta en silencio.
+- **Hallazgo.** La cuota gratuita de `gemini-3.5-flash` es de 20 peticiones por día
+  (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`). No basta para juzgar una ejecución
+  completa de dev (unas 17 llamadas al juez por repetición). La elección del juez queda
+  pendiente del propietario.

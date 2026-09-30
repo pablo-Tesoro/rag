@@ -9,7 +9,7 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 | 1 | Esqueleto y datos | ✅ Terminada (dataset revisado y aprobado) |
 | 2 | Ingesta y recuperación | ✅ Terminada y verificada con el modelo real |
 | 3 | Agente y API | ✅ Terminada y probada con Gemini |
-| 4 | Evaluación (harness, métricas, puerta de calidad) | ⏳ Pendiente |
+| 4 | Evaluación (harness, métricas, puerta de calidad) | 🟡 Harness terminado; falta elegir el juez y la primera ejecución completa |
 | 5 | Trazas, Docker y CI | ⏳ Pendiente |
 | 6 | Ablación y README | ⏳ Pendiente |
 
@@ -97,8 +97,8 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 ## Fase 3: prueba real con Gemini
 
 - Modelo: `gemini-3.5-flash-lite` aparece en `models.list` y responde con la clave del
-  entorno, así que `LLM_MODEL` no cambia. La API no indica si el proyecto tiene facturación
-  activada: que sea el tier gratuito depende de cómo se creó la clave.
+  entorno, así que `LLM_MODEL` no cambia. En la fase 4 se confirmó que el proyecto está en el
+  tier gratuito: el error de cuota nombra `generate_content_free_tier_requests`.
 - Montaje: Postgres con `docker compose up -d db`, `make ingest-local` (13 documentos, 67
   chunks, 50 operaciones) y la API en local con `uv run uvicorn`. `/readyz` responde 200 con
   las cuatro comprobaciones en verde. La imagen Docker no se ha probado con Gemini aquí: el
@@ -134,9 +134,56 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
   - Con `sin_evidencia`, las citas se vacían aunque la respuesta mencione un documento
     público (NOR-002 §5 en PER-01). Hay que decidir si esa cita debe conservarse.
 
+## Fase 4: qué hay
+
+- `evals/agent_eval.py` (`make eval`): ejecuta los casos con el mismo grafo y las mismas
+  dependencias que la API (`services.agent_deps`). Opciones: `--split`, `--cases`,
+  `--limit`, `--repeat k`, `--concurrency`, `--retrieval-mode` y `--prompt-version`. El
+  split de test solo se ejecuta si se pide expresamente.
+- `evals/runner.py`: registra la respuesta, las herramientas intentadas, lo recuperado, los
+  resultados que vio el modelo, las propuestas y las decisiones de aprobación, los tokens y
+  la latencia. Las incidencias van a `evals/sandbox.py` (D-29).
+- `evals/metrics/agent.py`: comprobaciones por código, agregación (tasa de aprobados,
+  pass^k, por categoría, violaciones de seguridad) y puerta de calidad (D-30, D-31).
+- `evals/judge.py` y `prompts/eval_judge/v1.md`: juez LLM con veredicto por hecho clave,
+  contradicción y afirmaciones sin soporte, en salida estructurada validada.
+- `evals/judge_controls.py` (`make eval-judge`): controles negativos del juez.
+- `evals/report.py`: informe Markdown con la puerta, el resumen, cada ejecución, el uso de
+  tokens, el coste equivalente (`evals/prices.json`, con fuente y fecha) y el detalle de los
+  fallos con el análisis del juez.
+- Limitador por modelo y 6 intentos por llamada (D-32). El aviso de Gemini sobre
+  `additionalProperties`, que aparecía en cada llamada, se silencia en `logs.py`: la
+  restricción la aplica Pydantic.
+- Tests: 163 en verde. Hay unitarios de comprobaciones, puerta, juez y runner (con LLM
+  guionizado), y uno de integración que pasa los 30 casos del dataset por Postgres real con
+  un LLM de reglas y un juez fijo.
+
+## Fase 4: validación con Gemini
+
+- Ejecuciones de validación del harness sobre COD-01, MUL-01, PER-01, INY-01 y APR-01. No se
+  guardaron en `evals/results/` porque se hicieron con el árbol sin commitear.
+  - Todo funciona de principio a fin: el juez devuelve salida estructurada válida, la
+    aprobación va al sandbox y el informe se genera.
+  - Encontré un falso negativo del juez en APR-01 (D-30): no veía la aprobación humana. Con
+    la corrección, APR-01 pasa en 2 de 2 repeticiones.
+- Controles del juez: con el prompt actual, la respuesta correcta se aceptó, y la cifra
+  errónea y la afirmación inventada se detectaron. Fue una comprobación manual, no guardada.
+  `make eval-judge` quedó a medias: el primer control fue bien y después se agotó la cuota
+  diaria del juez.
+- Límite encontrado: `gemini-3.5-flash` tiene 20 peticiones al día en el tier gratuito. No
+  basta para una ejecución completa de dev (unas 17 llamadas al juez por repetición, 51 con
+  `--repeat 3`). Los límites de cada modelo solo se ven en AI Studio
+  (`aistudio.google.com/rate-limit`).
+- Observación: en la API, `LLM_MAX_RETRIES=2` significa 2 intentos (1 reintento), porque el
+  SDK de Google lo interpreta como intentos. No se ha cambiado.
+
 ## Siguiente paso
 
-1. Fase 4: harness de evaluación.
+1. Elegir el modelo del juez según las cuotas del tier gratuito (decisión del propietario).
+2. `make eval-judge` con ese juez y la primera ejecución completa de dev, con autorización
+   del propietario. Revisar a mano cada veredicto del juez.
+3. Con esa línea base, decidir si se hace un prompt `v2` con las observaciones de la fase 3
+   y medirlo con el mismo harness.
 
 ## Incidente de seguridad (30/09/2026)
 
@@ -157,6 +204,8 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 - ⚠️ Confirmar que la clave expuesta está revocada en Google AI Studio: desde aquí no se
   puede comprobar.
 - Opcional: `LANGSMITH_API_KEY` para las trazas de la fase 5.
+- Pendiente: consultar en `aistudio.google.com/rate-limit` los límites diarios del tier
+  gratuito para `gemini-3.5-flash-lite` (agente) y los candidatos a juez.
 
 ## Notas del entorno en la nube
 
