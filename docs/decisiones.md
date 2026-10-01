@@ -528,6 +528,19 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
 - **Trade-offs.** No se repite v1 en todo dev con `--repeat 3`: la cuota diaria del tier
   gratuito no da para las dos ejecuciones completas. La comparación directa se limita a los
   casos afectados; el resto de dev se compara con la línea base de una repetición.
+- **Resultado: v2 adoptado.**
+  - Comparador v1, 3 repeticiones del subconjunto en `927d40d`
+    (`evals/results/20261001T101421Z_agent_dev.*`): 12 de 12.
+  - v2, todo dev con 3 repeticiones en `516f5fc`
+    (`evals/results/20261001T103057Z_agent_dev.*`): puerta PASS, 58 de 60 ejecuciones y
+    pass^3 de 0,90. PER-01 pasa en 3 de 3, y en una de ellas cita la remisión (NOR-002 §5);
+    el subconjunto pasa 12 de 12.
+  - Los dos fallos (OPE-01 #1 y MUL-01 #3) están en casos que el cambio no toca. La revisión
+    manual confirma que los dos son errores reales y menores, no del juez.
+  - Lectura honesta: el fallo de PER-01 con v1 era intermitente (1 de 5 ejecuciones
+    observadas) y el comparador pasó 12 de 12. Con tres repeticiones no se puede afirmar
+    que v2 mejore la tasa. Se adopta porque elimina la contradicción del contrato sin
+    empeorar nada medible.
 
 ## D-34. Trazas en LangSmith: opcionales, enmascaradas en origen y separadas de los logs
 

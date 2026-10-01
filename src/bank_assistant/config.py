@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # --- Agent ---
     prompts_dir: Path = Path("prompts")
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"  # v1 kept for comparison (D-33)
     tool_timeout_s: float = Field(default=10.0, gt=0)
     max_tool_calls_per_turn: int = Field(default=8, gt=0)
     agent_recursion_limit: int = Field(default=20, gt=0)

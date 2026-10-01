@@ -9,8 +9,8 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 | 1 | Esqueleto y datos | ✅ Terminada (dataset revisado y aprobado) |
 | 2 | Ingesta y recuperación | ✅ Terminada y verificada con el modelo real |
 | 3 | Agente y API | ✅ Terminada y probada con Gemini |
-| 4 | Evaluación (harness, métricas, puerta de calidad) | 🟡 Línea base medida en dev: 19 de 20; la puerta falla por PER-01 |
-| 5 | Trazas, Docker y CI | 🟡 Implementada y probada en local; falta ver la CI en verde en GitHub |
+| 4 | Evaluación (harness, métricas, puerta de calidad) | ✅ Terminada: prompt v2 adoptado, puerta PASS en dev con `--repeat 3` |
+| 5 | Trazas, Docker y CI | ✅ Terminada: CI en verde en GitHub; `eval.yml` pendiente de `main` y del secreto |
 | 6 | Ablación y README | ⏳ Pendiente |
 
 ## Fase 1: qué hay
@@ -215,16 +215,54 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 - Con una sola repetición no se puede hablar de consistencia: PER-01 se abstuvo bien en la
   fase 3 y aquí no.
 
+## Fase 4: prompt v2 y cierre
+
+El propietario delegó la decisión. El diseño, la medición y los criterios de adopción se
+registraron en D-33 antes de ejecutar nada (commit `927d40d`).
+
+- Cambio:
+  - `sin_evidencia` y las citas son independientes: el grafo valida las citas igual aunque
+    el agente se abstenga.
+  - El prompt `v2` solo cambia la regla 3: abstenerse y citar la sección que remite a un
+    documento inaccesible.
+- Comparador v1, 3 repeticiones de PER-01, PER-03, SIN-01 y SIN-03, antes del cambio
+  (`20261001T101421Z`): 12 de 12. PER-01 se abstuvo bien las tres veces, así que el fallo
+  de la línea base era intermitente (1 de 5 ejecuciones observadas).
+- v2 en todo dev con 3 repeticiones, commit `516f5fc` (`evals/results/20261001T103057Z_agent_dev.*`):
+
+  | Métrica | Valor |
+  |---|---|
+  | Puerta de calidad | PASS |
+  | Tasa de aprobados | 0,97 (58 de 60) |
+  | pass^3 | 0,90 (18 de 20 casos) |
+  | Casos críticos fallidos | 0 de 4, en todas las repeticiones |
+  | Violaciones de seguridad y errores | 0 |
+  | `answer_correct` / `grounded` | 0,98 / 0,96 |
+
+- Criterios de D-33 cumplidos: PER-01 pasa 3 de 3 (en una cita NOR-002 §5), el subconjunto
+  pasa 12 de 12 y la puerta pasa. **v2 es el prompt por defecto**; v1 se conserva para
+  comparar.
+- Revisión manual de los dos fallos, en casos que el cambio no toca. Los dos son errores
+  reales y menores, no del juez:
+  - OPE-01 #1: afirma como hecho la causa de la retención («debido a… beneficiario nuevo»).
+    La normativa solo dice que esas transferencias «pueden quedar retenidas». Es la
+    observación de la fase 3. El análisis del juez añade un argumento de confidencialidad
+    que no aplica, porque la norma se refiere al cliente, pero la afirmación causal sí
+    carece de soporte.
+  - MUL-01 #3: llama «categoría» a la prioridad P2 y no nombra `cargo_duplicado`. El plazo
+    final (2 días hábiles) es correcto.
+- Lectura honesta: con tres repeticiones no se puede afirmar que v2 mejore la tasa de
+  PER-01. Se adopta porque elimina la contradicción del contrato sin empeorar nada medible.
+- El split de test sigue sin ejecutarse: se reserva para el informe final.
+
 ## Siguiente paso
 
-1. Decidir cómo resolver PER-01 (decisión del propietario). Propuesta: un prompt `v2` que
-   pida abstenerse y citar la remisión cuando la normativa solo remite a un documento
-   inaccesible, y que el grafo conserve las citas válidas también con `sin_evidencia`. Es
-   un cambio de D-20 que hay que medir.
-2. Medir v1 y la alternativa con `--repeat 3` en dev (unas 150 llamadas del agente y 51 del
-   juez por ejecución), con autorización del propietario.
-3. Cerrar la fase 4 con la línea base y la decisión documentadas. El split de test sigue sin
-   ejecutarse.
+1. Fase 6: ablación de los modos de recuperación con el agente y README final con las cifras
+   de `evals/results/`, incluida la única ejecución del split de test.
+2. Candidatos a un prompt `v3`, que habría que medir:
+   - no presentar como hecho el motivo probable de una retención;
+   - nombrar categoría y prioridad por separado;
+   - tratar al empleado de tú.
 
 ## Fase 5: qué hay
 
@@ -244,9 +282,20 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
   números que en la fase 2 (hybrid 0,962 y 0,910) y la pasa.
 - Los tests de integración fallan en lugar de saltarse si `REQUIRE_POSTGRES=1`.
 - Verificado en local: los tests de trazas usan un endpoint falso de LangSmith y examinan lo
-  que se habría subido. La construcción de la imagen y la evaluación bajo demanda se
-  verifican en GitHub: aquí el sistema de permisos deniega construir la imagen con la CA
-  del proxy.
+  que se habría subido.
+- Verificado en GitHub, en el PR #1 (`b29d6b2`), revisando el log de cada trabajo:
+  - `check`: ruff, mypy y 184 tests sin ningún salto; los de integración corrieron contra el
+    Postgres de servicio.
+  - `retrieval`: los mismos números que en local y en la fase 2 (dense 0,872/0,904, bm25
+    0,923/0,938, hybrid 0,962/0,910); la recuperación es determinista entre máquinas y la
+    puerta pasa.
+  - `docker`: la imagen se construye y el stack arranca. Tras la ingesta, `/readyz` marca
+    todo listo salvo `llm_configured`, y `/chat` responde 503 con el motivo.
+- Pendiente:
+  - `eval.yml` solo se puede lanzar desde `main` y con el secreto `GOOGLE_API_KEY`.
+  - GitHub avisa de que `checkout@v4`, `cache@v4`, `upload-artifact@v4` y `setup-uv@v6`
+    usan Node 20, que se está retirando. Funcionan con Node 24; conviene subir de versión
+    mayor y fijarlas por SHA.
 
 ## Incidente de seguridad (30/09/2026)
 
