@@ -616,3 +616,23 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
     ejecución de `eval.yml`, por disciplina y no por automatismo.
   - `eval.yml` solo se puede lanzar desde la rama por defecto y con el secreto configurado:
     no se ha podido ejecutar todavía.
+
+## D-36. Ablación de la recuperación y única ejecución del split de test
+
+- **Contexto.** La fase 2 comparó los modos de recuperación sin LLM (D-16). Falta saber si
+  la ventaja de hybrid se mantiene cuando el agente reformula y encadena búsquedas. Y el
+  split de test, reservado desde la fase 1 (D-09), debe dar la cifra final sin que nada se
+  ajuste después de verla.
+- **Protocolo, fijado antes de ejecutar.**
+  - Ablación en dev con el agente: dense y bm25 con `--repeat 1`. Hybrid ya está medido con
+    `--repeat 3` (D-33) y no se repite, por la cuota diaria. Se compara la tasa de aprobados
+    por ejecución, que no depende de k; pass^k no es comparable entre k distintos.
+  - La ablación es descriptiva: el modo desplegado sigue siendo hybrid salvo que otro modo
+    lo supere a la vez en recall@5 sin LLM, en tasa de aprobados del agente y sin fallos
+    críticos.
+  - Test: una única ejecución con la configuración final (prompt v2, hybrid, juez
+    `gemini-3.1-flash-lite` con `eval_judge` v1) y `--repeat 3`, más la evaluación de
+    recuperación sin LLM sobre test. Se informa tal cual y no se cambia nada después de
+    verla. Si sale peor que dev, se documenta y se explica, sin repetir hasta que salga bien.
+  - `make eval-ablation` recorre los tres modos. En esta ejecución solo se lanzan dense y
+    bm25, por el motivo de cuota indicado.

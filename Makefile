@@ -56,5 +56,8 @@ eval: ## Agent eval on dev with the real LLM (rate limited). Flags: make eval AR
 eval-judge: ## Check the LLM judge against answers whose verdict is known (4 judge calls)
 	$(UV) run python -m evals.judge_controls
 
-eval-ablation: ## Run the retrieval-mode ablation (phase 6)
-	@echo "Not implemented yet: arrives in phase 6." && exit 1
+eval-ablation: ## Agent eval on dev for each retrieval mode (LLM calls). Flags: ARGS="--repeat 3"
+	@# An ablation compares modes: each run reports its gate verdict, none stops the loop.
+	@for mode in dense bm25 hybrid; do \
+		$(UV) run python -m evals.agent_eval --split dev --retrieval-mode $$mode $(ARGS) || true; \
+	done
