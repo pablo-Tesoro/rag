@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import pytest
 
 from evals.metrics.retrieval import matches, recall_at_k, reciprocal_rank
+from evals.retrieval_eval import RetrievalGate
 from evals.schema import SectionRef
 
 
@@ -49,3 +50,12 @@ def test_reciprocal_rank_uses_the_first_relevant_position() -> None:
 def test_recall_needs_labels() -> None:
     with pytest.raises(ValueError):
         recall_at_k([], [], k=5)
+
+
+def test_retrieval_gate_fails_when_a_whole_case_is_lost() -> None:
+    gate = RetrievalGate()
+
+    assert gate.evaluate({"recall": 12.5 / 13, "mrr": 0.91}) == []  # the phase 2 baseline
+    assert gate.evaluate({"recall": 12 / 13, "mrr": 0.87}) == []  # half a case, one position
+    assert gate.evaluate({"recall": 11.5 / 13, "mrr": 0.91}) == ["recall 0.885 < 0.90"]
+    assert gate.evaluate({"recall": 1.0, "mrr": 0.83}) == ["MRR 0.830 < 0.85"]

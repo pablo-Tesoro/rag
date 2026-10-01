@@ -375,3 +375,296 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
   el número de herramientas usadas. Los logs de uvicorn pasan por el mismo formateador JSON.
 - **Trade-offs.** No hay registro por petición de `/healthz` ni de `/readyz`; para eso están
   las métricas del orquestador.
+
+## D-28. Los resultados de las herramientas también son prompt
+
+- **Contexto.** En la prueba real con Gemini, tras rechazar una incidencia, el modelo a
+  veces respondía como si faltara la confirmación y volvía a pedirla. El mensaje que recibía
+  («El empleado ha rechazado la incidencia: no se ha registrado…») era correcto, pero no
+  decía qué contestar. Además, el modelo lo mezclaba con NOR-006 §5 («si el empleado no la
+  confirma, la incidencia no se registra»).
+- **Alternativas.**
+  - Añadir una regla al prompt de sistema: exige una versión `v2` y la regla queda lejos del
+    momento en que el modelo lee la decisión.
+  - Resolver la respuesta por código tras un rechazo, sin volver a llamar al modelo: es
+    fiable, pero quita al modelo el cierre de la conversación (por ejemplo, contestar
+    también a otra pregunta del mismo turno).
+- **Elección.** Corregir el propio mensaje de la herramienta: dice quién ha decidido
+  («ha decidido no abrirla»), que no se ha registrado y que se le diga al empleado, de tú y
+  sin pedir otra confirmación. El prompt de sistema sigue en `v1`.
+- **Trade-offs.** Estos mensajes no llevan versión propia como los prompts. El commit de
+  cada evaluación los identifica, y un test unitario comprueba el contenido del rechazo.
+  Con 6 intentos posteriores el error no se repite, pero la redacción varía: la tasa real
+  se medirá en la fase 4 con repeticiones (pass^k).
+
+## D-29. El harness evalúa el grafo desplegado, con las escrituras en un sandbox
+
+- **Contexto.** Una evaluación que monta el agente de otra manera mide otra cosa. Además,
+  los casos de aprobación abren incidencias, y una evaluación no debe escribir en un sistema
+  real.
+- **Alternativas.**
+  - Evaluar a través de la API HTTP: mide lo desplegado, pero no deja ver el estado
+    (herramientas intentadas, chunks recuperados) sin exponerlo en la API.
+  - Montar el grafo con dependencias propias del harness: puede divergir de producción.
+  - Escribir las incidencias en la base de datos de desarrollo y contarlas: carreras entre
+    casos concurrentes y datos de prueba mezclados con los reales.
+- **Elección.**
+  - La construcción de dependencias se extrae a `services.agent_deps`, que usan tanto la API
+    como el harness.
+  - El harness solo sustituye dos piezas: las incidencias van a `SandboxIncidents` (mismo
+    contrato e idempotencia que el repositorio) y las conversaciones a un checkpointer en
+    memoria.
+  - El harness responde a la interrupción de aprobación: con la decisión del caso y, ante
+    cualquier otra propuesta, con un rechazo. Nunca aprueba una escritura por su cuenta.
+- **Trade-offs.** El camino real de escritura (restricción única, `ON CONFLICT`, reanudación
+  tras una caída) no se ejerce en la evaluación; lo cubren los tests de integración.
+
+## D-30. Código primero; el juez solo para lo que el código no puede decidir
+
+- **Contexto.** Un juez LLM es caro, lento y no determinista. Muchas propiedades
+  importantes, entre ellas todas las de seguridad, se pueden comprobar exactamente.
+- **Elección.**
+  - Por código: herramientas esperadas y prohibidas (también las propuestas),
+    documentos prohibidos (recuperados o citados), cadenas prohibidas, abstención y
+    aprobación (propuesta, nada escrito antes de decidir, 1 o 0 incidencias después).
+  - Por el juez, solo en los casos con `key_facts`: corrección (cada hecho clave presente y
+    sin contradicción con la referencia) y fundamentación (ninguna afirmación concreta
+    ausente de la evidencia).
+  - Veredictos binarios por hecho clave en lugar de una nota de 1 a 10: son más estables y
+    se pueden auditar uno a uno. Su media es el recall de hechos clave.
+  - El juez ve la evidencia que vio el agente, así que la fundamentación se mide contra lo
+    que el agente leyó. Completa D-20, que solo comprueba que la fuente citada se recuperó.
+  - Salida estructurada validada por código: si falta o sobra un veredicto, el juicio es un
+    error, no un aprobado.
+  - El juez es un modelo distinto del agente, para limitar la autopreferencia. No es más
+    capaz: lo impone la cuota del tier gratuito (D-32).
+- **Cómo se ha validado el juez.**
+  - Primera ejecución real: el juez suspendió APR-01 porque la respuesta decía «incidencia
+    registrada» y la referencia describe el proceso («propone… espera la confirmación»). No
+    veía la aprobación, que ocurre fuera de los mensajes. Ahora la evidencia incluye
+    `[aprobacion_humana]` y el prompt aclara que el proceso lo comprueba el código. Con el
+    cambio, APR-01 pasa en 2 de 2 repeticiones.
+  - `make eval-judge` ejecuta controles negativos: respuestas escritas a mano sobre COD-01
+    cuyo veredicto se conoce (correcta, falta un hecho, cifra errónea, afirmación
+    inventada). Un juez que lo aprueba todo no sirve.
+- **Trade-offs.** El juez también puede equivocarse, y los controles solo cubren errores
+  evidentes. Por eso las respuestas suspendidas por el juez se revisan a mano en el informe,
+  que incluye su análisis.
+
+## D-31. Puerta de calidad fijada antes de ver resultados, y consistencia con pass^k
+
+- **Contexto.** Unos umbrales elegidos después de ver los números se ajustan a lo que salió.
+  Y con un agente no determinista, un único acierto no demuestra que el caso esté resuelto.
+- **Elección.**
+  - Una ejecución pasa si termina sin error y cumple todas las comprobaciones que le aplican.
+  - La puerta falla si algún caso crítico (permisos, inyección, aprobación) falla en alguna
+    repetición, si alguna ejecución termina con error (resultado incompleto) o si la tasa de
+    aprobados baja de 0,80.
+  - `--repeat k` ejecuta cada caso k veces e informa de pass^k (casos que pasan en todas).
+  - El umbral de 0,80 se fijó antes de la primera ejecución completa y vive en código
+    (`QualityGate`): cambiarlo es un cambio revisable.
+  - El código de salida es 1 cuando la puerta falla, para usarlo en CI.
+- **Trade-offs.** Con 20 casos de dev, un caso equivale a 0,05 de tasa. El umbral es
+  orientativo; la condición fuerte es la de los críticos.
+
+## D-32. Tier gratuito: limitador por modelo, reintentos y coste equivalente
+
+- **Contexto.** El tier gratuito limita peticiones por minuto y por día, por proyecto y por
+  modelo. Los límites concretos solo aparecen en AI Studio, no en la documentación.
+- **Elección.**
+  - Un `InMemoryRateLimiter` de LangChain por modelo (agente y juez tienen cuotas separadas),
+    configurable con `EVAL_REQUESTS_PER_MINUTE`.
+  - Hasta 6 intentos con backoff exponencial en 429 y 5xx. `max_retries` se pasa al SDK de
+    Google como número de intentos, contando el primero.
+  - Coste real 0; se informa del coste equivalente en el tier de pago con `prices.json`,
+    que lleva la fuente y la fecha. Un modelo sin precio se queda sin coste, no con uno
+    inventado.
+  - Si una ejecución falla por cuota, queda como error y la puerta la marca incompleta; no
+    se reintenta en silencio.
+- **El juez y su cuota.**
+  - La primera opción era `gemini-3.5-flash`, más capaz que el agente. Su cuota gratuita es
+    de 20 peticiones por día (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`) y una
+    ejecución de dev necesita unas 17 llamadas al juez por repetición.
+  - `gemini-2.5-flash` aparece en `models.list`, pero responde 404: ya no admite usuarios
+    nuevos.
+  - Elegido: `gemini-3.1-flash-lite`, la generación anterior de la familia lite. Es un modelo
+    distinto del agente, con su propia cuota, y fijo (sin alias como
+    `gemini-flash-lite-latest`, que cambian de destino y rompen la reproducibilidad).
+  - No es más capaz que el agente, y eso es un riesgo: un juez débil puede dejar pasar
+    errores sutiles. Se compensa con veredictos binarios contra una referencia (una tarea
+    más fácil que la del agente), con los controles de `make eval-judge` (4 de 4 de acuerdo,
+    `evals/results/20261001T095702Z_judge_controls.json`) y con la revisión manual de cada
+    fallo.
+
+## D-33. Abstenerse y citar la remisión: contrato independiente y prompt v2
+
+- **Contexto.** En la línea base de dev, PER-01 (crítico) falló la abstención sin ninguna
+  fuga. El agente no tenía la respuesta, la normativa pública (NOR-002 §5) solo remite a un
+  documento restringido, y el contrato le obligaba a elegir entre abstenerse y citar esa
+  remisión:
+  - la regla 3 del prompt v1 dice «marca `sin_evidencia`… sin citas»;
+  - con `sin_evidencia`, el grafo vaciaba las citas (D-20).
+  En la fase 3 eligió abstenerse; en la línea base, citar.
+- **Alternativas.**
+  - Cambiar la etiqueta de PER-01: sería ajustar el dataset al modelo.
+  - Solo cambiar el prompt: la cita de la remisión seguiría perdiéndose en el grafo.
+- **Elección.**
+  - `sin_evidencia` y `citas` pasan a ser independientes. `sin_evidencia` dice si la
+    evidencia responde a la pregunta, y `citas` respalda lo que afirma el texto.
+  - Las citas se validan igual haya o no evidencia: una cita no recuperada vuelve al modelo
+    una vez y, si persiste, se descarta. Esto sustituye la regla de D-20 de vaciar las citas.
+  - Prompt `v2`: solo cambia la regla 3. Cuando lo único que hay es una remisión a un
+    documento que no aparece en los resultados, el agente debe abstenerse y citar la sección
+    que hace la remisión. El tratamiento de tú queda fuera, para que el efecto medido tenga
+    una sola causa.
+- **Medición, fijada antes de ejecutar.**
+  - Antes del cambio (commit de este registro): v1 con `--repeat 3` sobre los cuatro casos
+    que toca el contrato: PER-01, PER-03, SIN-01 y SIN-03.
+  - Después del cambio: v2 con `--repeat 3` sobre todo dev.
+  - Se adopta v2 si PER-01 pasa en 3 de 3, el subconjunto no empeora frente a v1 y la puerta
+    de calidad pasa en dev con v2.
+  - Si la puerta falla por un caso ajeno al cambio, se informa como hallazgo de
+    consistencia y no se toca la puerta.
+- **Trade-offs.** No se repite v1 en todo dev con `--repeat 3`: la cuota diaria del tier
+  gratuito no da para las dos ejecuciones completas. La comparación directa se limita a los
+  casos afectados; el resto de dev se compara con la línea base de una repetición.
+- **Resultado: v2 adoptado.**
+  - Comparador v1, 3 repeticiones del subconjunto en `927d40d`
+    (`evals/results/20261001T101421Z_agent_dev.*`): 12 de 12.
+  - v2, todo dev con 3 repeticiones en `516f5fc`
+    (`evals/results/20261001T103057Z_agent_dev.*`): puerta PASS, 58 de 60 ejecuciones y
+    pass^3 de 0,90. PER-01 pasa en 3 de 3, y en una de ellas cita la remisión (NOR-002 §5);
+    el subconjunto pasa 12 de 12.
+  - Los dos fallos (OPE-01 #1 y MUL-01 #3) están en casos que el cambio no toca. La revisión
+    manual confirma que los dos son errores reales y menores, no del juez.
+  - Lectura honesta: el fallo de PER-01 con v1 era intermitente (1 de 5 ejecuciones
+    observadas) y el comparador pasó 12 de 12. Con tres repeticiones no se puede afirmar
+    que v2 mejore la tasa. Se adopta porque elimina la contradicción del contrato sin
+    empeorar nada medible.
+
+## D-34. Trazas en LangSmith: opcionales, enmascaradas en origen y separadas de los logs
+
+- **Contexto.** Los logs no llevan contenido (D-10). Para depurar un agente hace falta ver la
+  pregunta, lo recuperado y cada paso del modelo. LangSmith lo registra con LangGraph sin
+  instrumentar nada a mano.
+- **Alternativas.**
+  - Activar el trazado global de LangChain con `LANGSMITH_TRACING=true`: no requiere
+    código, pero sube todas las ejecuciones sin enmascarar y no permite elegir cuáles.
+  - OpenTelemetry con un backend propio: es estándar, pero obliga a instrumentar a mano lo
+    que LangSmith ya entiende (ejecuciones anidadas, mensajes, tokens).
+  - No trazar: depurar un fallo se queda en los logs, que no tienen contenido.
+- **Elección.**
+  - Un interruptor propio, `TRACE_TO_LANGSMITH`, apagado por defecto. `tracing.py` construye
+    el tracer y se pasa en la configuración de cada ejecución, tanto en la API como en la
+    evaluación.
+  - El cliente de LangSmith aplica un anonimizador a entradas, salidas, errores y metadatos
+    antes de subir nada:
+    - los ids de empleado pasan a ser el mismo seudónimo HMAC de los logs, para poder
+      cruzar un log con su traza;
+    - DNI, NIE, IBAN, correo y teléfono se sustituyen por marcadores.
+  - Metadatos para filtrar: versión del prompt, modo de recuperación, modelo y `thread_id`.
+    LangSmith agrupa por `thread_id` las ejecuciones de una conversación, incluida la
+    reanudación tras una aprobación.
+  - Las evaluaciones van a su propio proyecto (`banco-olvessa-evals`), y el informe guarda el
+    id de cada ejecución trazada para ir de un caso fallido a su traza.
+  - Sin clave, el servicio arranca igual y registra `tracing.disabled`. Si alguien activa
+    el trazado global, se registra un aviso.
+- **Verificación.** No hay clave de LangSmith en el entorno. Un test apunta el cliente a un
+  endpoint falso local y examina los bytes que se habrían subido:
+  - ni el id de empleado ni el DNI salen en claro;
+  - sí salen el seudónimo, los marcadores y el contenido de negocio.
+  El test encontró que la parte `serialized` (la configuración del componente) no pasa por
+  el anonimizador. Con el modelo real solo contiene la clase y sus parámetros, con la clave
+  como marcador secreto. El doble de pruebas, en cambio, guardaba su guion ahí, y se ha
+  excluido de su `repr`.
+- **Trade-offs.**
+  - El enmascarado por expresiones regulares solo cubre formatos conocidos: un nombre propio
+    escrito por el empleado no se detecta.
+  - En producción harían falta además control de acceso y retención en el proyecto de
+    LangSmith, o una instancia autoalojada.
+  - No se ha probado contra LangSmith real.
+
+## D-35. CI: lo determinista en cada cambio y lo que gasta cuota, bajo demanda
+
+- **Contexto.** La puerta del agente necesita el LLM, y el tier gratuito tiene cuota diaria.
+  El resto de comprobaciones es determinista y gratis.
+- **Elección.**
+  - `ci.yml` se ejecuta en cada pull request y en `main`, con tres trabajos en paralelo:
+    - `check`: ruff, mypy y pytest contra un Postgres de servicio (pgvector), con
+      `REQUIRE_POSTGRES=1` para que los tests de integración no se salten en silencio.
+      `uv sync --locked` falla si el lockfile no está al día.
+    - `retrieval`: ingesta con el modelo real de embeddings (en caché) y
+      `make eval-retrieval` con una puerta de regresión: recall@5 ≥ 0,90 y MRR@10 ≥ 0,85
+      para el modo desplegado en dev. Es una guarda frente a regresiones, derivada de la
+      línea base de la fase 2 (0,962 y 0,910), no un objetivo de calidad. Perder un caso
+      entero la hace fallar; que un caso baje un puesto, no.
+    - `docker`: construye la imagen y levanta el stack. Comprueba que `/healthz` responde y
+      que `/readyz` da 503 sin datos ni clave. Después carga los datos dentro del stack y
+      comprueba que todo está listo salvo el LLM y que `/chat` responde 503 con el motivo.
+  - `eval.yml`, bajo demanda (`workflow_dispatch`): ingesta, controles del juez y evaluación
+    del agente con la puerta de calidad. El informe queda como artefacto y en el resumen
+    del job. Necesita el secreto `GOOGLE_API_KEY`. Las entradas llegan al script como
+    variables de entorno y los ids de caso se validan, para evitar inyecciones en el shell.
+  - Permisos mínimos (`contents: read`). CI cancela las ejecuciones obsoletas de una misma
+    rama. La evaluación no se cancela y va de una en una, porque las ejecuciones comparten
+    cuota.
+- **Trade-offs.**
+  - Las acciones se fijan por versión mayor (`@v4`, `@v6`), no por SHA. Es más fácil de
+    mantener, pero un tag movido podría cambiar el código que se ejecuta. En un repositorio
+    de producción se fijarían por SHA y se actualizarían con Dependabot.
+  - La puerta del agente no bloquea los PR: un cambio de prompt debe ir acompañado de una
+    ejecución de `eval.yml`, por disciplina y no por automatismo.
+  - `eval.yml` solo se puede lanzar desde la rama por defecto y con el secreto configurado:
+    no se ha podido ejecutar todavía.
+
+## D-36. Ablación de la recuperación y única ejecución del split de test
+
+- **Contexto.** La fase 2 comparó los modos de recuperación sin LLM (D-16). Falta saber si
+  la ventaja de hybrid se mantiene cuando el agente reformula y encadena búsquedas. Y el
+  split de test, reservado desde la fase 1 (D-09), debe dar la cifra final sin que nada se
+  ajuste después de verla.
+- **Protocolo, fijado antes de ejecutar.**
+  - Ablación en dev con el agente: dense y bm25 con `--repeat 1`. Hybrid ya está medido con
+    `--repeat 3` (D-33) y no se repite, por la cuota diaria. Se compara la tasa de aprobados
+    por ejecución, que no depende de k; pass^k no es comparable entre k distintos.
+  - La ablación es descriptiva: el modo desplegado sigue siendo hybrid salvo que otro modo
+    lo supere a la vez en recall@5 sin LLM, en tasa de aprobados del agente y sin fallos
+    críticos.
+  - Test: una única ejecución con la configuración final (prompt v2, hybrid, juez
+    `gemini-3.1-flash-lite` con `eval_judge` v1) y `--repeat 3`, más la evaluación de
+    recuperación sin LLM sobre test. Se informa tal cual y no se cambia nada después de
+    verla. Si sale peor que dev, se documenta y se explica, sin repetir hasta que salga bien.
+  - `make eval-ablation` recorre los tres modos. En esta ejecución solo se lanzan dense y
+    bm25, por el motivo de cuota indicado.
+- **Resultado.**
+  - Ablación (`20261001T121247Z` dense y `20261001T121759Z` bm25, frente a hybrid
+    `20261001T103057Z`):
+    - dense pasa 17 de 20 y falla la puerta (PER-01 y PER-03, críticos);
+    - bm25 pasa 19 de 20; FAC-02 falla porque no recupera NOR-009 §2, la misma debilidad
+      léxica de la fase 2;
+    - hybrid sigue siendo el mejor en recall sin LLM y en tasa de aprobados, así que se
+      mantiene.
+    - Con una ejecución por modo, solo el fallo de FAC-02 se puede atribuir a la
+      recuperación; el resto es variabilidad del modelo.
+  - Test, ejecutado una vez en `ca622ab` (`20261001T122733Z_agent_test.*` y
+    `20261001T121958Z_retrieval_test.*`): puerta PASS, 30 de 30 ejecuciones y pass^3 de
+    1,00. La revisión manual de las respuestas confirma el resultado.
+  - Con 10 casos, un resultado perfecto significa que ninguno falla, no que la tasa de error
+    sea cero. Dev es la estimación más informativa.
+  - La recuperación sin LLM en test falla OPE-02 en los tres modos: la pregunta solo nombra
+    la operación. El agente encuentra la sección tras consultarla (recall de evidencia 1,00):
+    es la salvedad de D-16 vista en un caso real.
+
+## D-37. Las cifras del README se generan a partir de los resultados guardados
+
+- **Contexto.** La regla del proyecto es que toda cifra del README sale de una ejecución
+  guardada en `evals/results/`. Escrita a mano, esa regla depende de la disciplina y una
+  cifra puede quedarse desfasada sin que nadie lo note.
+- **Elección.**
+  - `evals/readme_tables.py` genera las tablas del README entre dos marcadores a partir de
+    las ejecuciones listadas en `SOURCES`. Se regeneran con `make readme`.
+  - `tests/unit/test_readme.py` falla si el README no coincide con lo que generan esos
+    ficheros, y si alguna fuente es una ejecución parcial o con otra configuración.
+  - El texto escrito a mano no lleva cifras medidas: solo las explica.
+- **Trade-offs.** Cambiar una cifra exige apuntar a otra ejecución guardada, que es justo lo
+  que se busca. El formato de las tablas queda en código y no en el Markdown.

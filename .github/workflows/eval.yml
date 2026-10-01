@@ -1,0 +1,99 @@
+# Agent evaluation with the real LLM, on demand: it spends free-tier Gemini quota, so it does
+# not run on every change. Needs the GOOGLE_API_KEY repository secret. The job fails when
+# the judge disagrees with its controls or when the quality gate fails.
+name: Agent evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      split:
+        description: "Dataset split (test is held out for the final report)"
+        type: choice
+        options: [dev, test]
+        default: dev
+      repeat:
+        description: "Runs per case (pass^k)"
+        type: choice
+        options: ["1", "2", "3"]
+        default: "1"
+      cases:
+        description: "Space-separated case ids, e.g. PER-01 APR-01 (empty: the whole split)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-eval # one at a time: they share the daily quota
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.12.21"
+  PYTHON_VERSION: "3.12"
+  DATABASE_URL: postgresql://olvessa:olvessa-dev-only@localhost:5432/olvessa
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      db:
+        image: pgvector/pgvector:0.8.6-pg17
+        env:
+          POSTGRES_USER: olvessa
+          POSTGRES_PASSWORD: olvessa-dev-only
+          POSTGRES_DB: olvessa
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olvessa -d olvessa"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      # Inputs reach the shell as variables, never interpolated into the script.
+      SPLIT: ${{ inputs.split }}
+      REPEAT: ${{ inputs.repeat }}
+      CASES: ${{ inputs.cases }}
+    steps:
+      - name: Check the secret and the inputs
+        run: |
+          if [ -z "$GOOGLE_API_KEY" ]; then
+            echo "::error::Add GOOGLE_API_KEY as a repository secret"; exit 1
+          fi
+          if [ -n "$CASES" ] && ! printf '%s\n' "$CASES" | grep -Eq '^[A-Z]{3}-[0-9]{2}( [A-Z]{3}-[0-9]{2})*$'; then
+            echo "::error::cases must be space-separated ids like PER-01"; exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-intfloat-multilingual-e5-small
+      - run: make ingest-local
+      - name: The judge must agree with its controls before it judges anything
+        run: make eval-judge
+      - name: Agent evaluation and quality gate
+        run: |
+          args=(--split "$SPLIT" --repeat "$REPEAT")
+          if [ -n "$CASES" ]; then
+            read -r -a ids <<< "$CASES"
+            args+=(--cases "${ids[@]}")
+          fi
+          uv run python -m evals.agent_eval "${args[@]}"
+      - name: Report
+        if: always()
+        run: |
+          report=$(ls -t evals/results/*_agent_*.md 2>/dev/null | head -n 1)
+          if [ -n "$report" ]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-eval
+          path: evals/results/
+          if-no-files-found: ignore

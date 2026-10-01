@@ -5,11 +5,15 @@ It asks the raw question as the employee who owns the case (their groups apply) 
 includes obsolete documents only when the case expects the agent to request them.
 
     uv run python -m evals.retrieval_eval --modes dense bm25 hybrid --split dev
+
+On dev, the deployed mode (RETRIEVAL_MODE) must also pass a regression gate: the exit code
+is 1 if it falls below `RetrievalGate`, so CI can run it on every change at no LLM cost.
 """
 
 import argparse
 import asyncio
 import json
+import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -37,6 +41,25 @@ class CaseResult:
     recall: float
     reciprocal_rank: float
     retrieved: list[str]  # "NOR-002 §2" for the top results, for debugging
+
+
+@dataclass(frozen=True)
+class RetrievalGate:
+    """Regression guard, not a quality target: set from the phase 2 baseline (hybrid on dev,
+    recall@5 0.962 and MRR@10 0.910) so that losing a whole case that used to be found fails,
+    while a case slipping one position does not."""
+
+    min_recall: float = 0.90
+    min_mrr: float = 0.85
+
+    def evaluate(self, row: dict[str, Any]) -> list[str]:
+        """Reasons the gate fails for one mode's summary row; empty means it passes."""
+        reasons = []
+        if row["recall"] < self.min_recall:
+            reasons.append(f"recall {row['recall']:.3f} < {self.min_recall:.2f}")
+        if row["mrr"] < self.min_mrr:
+            reasons.append(f"MRR {row['mrr']:.3f} < {self.min_mrr:.2f}")
+        return reasons
 
 
 def wants_obsolete(case: EvalCase) -> bool:
@@ -127,7 +150,7 @@ def render_markdown(summary: dict[str, dict[str, Any]], config: dict[str, Any], 
     return "\n".join(lines) + "\n"
 
 
-async def main_async(settings: Settings, args: argparse.Namespace) -> None:
+async def main_async(settings: Settings, args: argparse.Namespace) -> int:
     from bank_assistant.services import build_embedder  # loads the model: only when running
 
     cases = [
@@ -162,20 +185,34 @@ async def main_async(settings: Settings, args: argparse.Namespace) -> None:
         "rrf_k": settings.rrf_k,
     }
     summary = summarise(results)
+    # The gate was calibrated on dev, for the mode the agent actually uses.
+    deployed = settings.retrieval_mode.value
+    gated = args.split == "dev" and deployed in summary
+    reasons = RetrievalGate().evaluate(summary[deployed]) if gated else []
+    gate = {"applied": gated, "mode": deployed, "passed": not reasons, "reasons": reasons}
     name = run_id(f"retrieval_{args.split}")
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIR / f"{name}.json").write_text(
         json.dumps(
-            {"config": config, "summary": summary, "cases": [asdict(r) for r in results]},
+            {
+                "config": config,
+                "gate": gate,
+                "summary": summary,
+                "cases": [asdict(r) for r in results],
+            },
             ensure_ascii=False,
             indent=2,
         ),
         encoding="utf-8",
     )
     markdown = render_markdown(summary, config, args.k)
+    if gated:
+        verdict = "PASS" if not reasons else "FAIL: " + "; ".join(reasons)
+        markdown += f"\nRegression gate ({deployed}): {verdict}\n"
     (RESULTS_DIR / f"{name}.md").write_text(markdown, encoding="utf-8")
     print(markdown)
     print(f"Saved evals/results/{name}.json and .md")
+    return 1 if reasons else 0
 
 
 def main() -> None:
@@ -188,7 +225,7 @@ def main() -> None:
     )
     parser.add_argument("--split", choices=["dev", "test", "all"], default="dev")
     parser.add_argument("--k", type=int, default=5)
-    asyncio.run(main_async(get_settings(), parser.parse_args()))
+    sys.exit(asyncio.run(main_async(get_settings(), parser.parse_args())))
 
 
 if __name__ == "__main__":

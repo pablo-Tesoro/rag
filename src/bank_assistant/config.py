@@ -49,11 +49,30 @@ class Settings(BaseSettings):
 
     # --- Agent ---
     prompts_dir: Path = Path("prompts")
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"  # v1 kept for comparison (D-33)
     tool_timeout_s: float = Field(default=10.0, gt=0)
     max_tool_calls_per_turn: int = Field(default=8, gt=0)
     agent_recursion_limit: int = Field(default=20, gt=0)
     request_timeout_s: float = Field(default=120.0, gt=0)
+
+    # --- Traces (LangSmith), off by default; see tracing.py ---
+    # Our own switch, not LANGSMITH_TRACING: that one turns on LangChain's global tracer,
+    # which would upload runs without the anonymizer.
+    trace_to_langsmith: bool = False
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "banco-olvessa"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+
+    # --- Evaluation harness (evals/agent_eval.py) ---
+    # A different model from the agent's, with its own free-tier quota, to limit
+    # self-preference. Checked against known verdicts with `make eval-judge` (D-30, D-32).
+    judge_model: str = "google_genai:gemini-3.1-flash-lite"
+    judge_prompt_version: str = "v1"
+    # Client-side limit per model (agent and judge each get their own), under the free tier.
+    eval_requests_per_minute: float = Field(default=10.0, gt=0)
+    # Attempts per LLM call, first included: evals can afford to wait out a 429.
+    eval_llm_attempts: int = Field(default=6, gt=0)
+    eval_concurrency: int = Field(default=3, gt=0)
 
     @property
     def corpus_dir(self) -> Path:

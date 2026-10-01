@@ -9,9 +9,10 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
@@ -30,6 +31,7 @@ from bank_assistant.ingestion.chunking import ChunkConfig
 from bank_assistant.llm import build_chat_model
 from bank_assistant.prompts import Prompt, load_prompt
 from bank_assistant.retrieval.retriever import Retriever
+from bank_assistant.tracing import build_tracer
 
 AgentGraph = CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]
 
@@ -56,6 +58,29 @@ def chunk_config(settings: Settings) -> ChunkConfig:
     )
 
 
+def agent_deps(
+    settings: Settings,
+    pool: AsyncConnectionPool,
+    embedder: Embedder,
+    llm: BaseChatModel,
+    prompt: Prompt,
+) -> AgentDeps:
+    """The agent's real dependencies. Shared by the API and the evaluation harness, so the
+    harness evaluates the same wiring that is deployed."""
+    return AgentDeps(
+        llm=llm,
+        search=Retriever(
+            pool, embedder, candidates=settings.retrieval_candidates, rrf_k=settings.rrf_k
+        ),
+        operations=CoreBankingRepository(pool),
+        incidents=IncidentRepository(pool),
+        system_prompt=prompt,
+        top_k=settings.retrieval_top_k,
+        tool_timeout_s=settings.tool_timeout_s,
+        max_tool_calls_per_turn=settings.max_tool_calls_per_turn,
+    )
+
+
 @dataclass(frozen=True)
 class Services:
     settings: Settings
@@ -66,6 +91,8 @@ class Services:
     prompt: Prompt
     readiness: Callable[[], Awaitable[dict[str, bool]]]
     unavailable_reason: str | None = None
+    # Handlers attached to every agent run: the LangSmith tracer when tracing is on.
+    callbacks: list[BaseCallbackHandler] = field(default_factory=list)
 
 
 @asynccontextmanager
@@ -117,21 +144,7 @@ async def open_services(
                 )
         graph: AgentGraph | None = None
         if llm is not None:
-            deps = AgentDeps(
-                llm=llm,
-                search=Retriever(
-                    pool,
-                    search_embedder,
-                    candidates=settings.retrieval_candidates,
-                    rrf_k=settings.rrf_k,
-                ),
-                operations=CoreBankingRepository(pool),
-                incidents=IncidentRepository(pool),
-                system_prompt=prompt,
-                top_k=settings.retrieval_top_k,
-                tool_timeout_s=settings.tool_timeout_s,
-                max_tool_calls_per_turn=settings.max_tool_calls_per_turn,
-            )
+            deps = agent_deps(settings, pool, search_embedder, llm, prompt)
             graph = build_graph(deps, checkpointer=checkpointer)
 
         async def readiness() -> dict[str, bool]:
@@ -155,14 +168,21 @@ async def open_services(
                 checks["database"] = False
             return checks
 
-        yield Services(
-            settings=settings,
-            graph=graph,
-            employees=EmployeeDirectory.from_file(settings.employees_file),
-            prompt=prompt,
-            readiness=readiness,
-            unavailable_reason=unavailable_reason,
-        )
+        tracer = build_tracer(settings)
+        try:
+            yield Services(
+                settings=settings,
+                graph=graph,
+                employees=EmployeeDirectory.from_file(settings.employees_file),
+                prompt=prompt,
+                readiness=readiness,
+                unavailable_reason=unavailable_reason,
+                callbacks=[tracer] if tracer else [],
+            )
+        finally:
+            if tracer is not None:
+                # Traces are uploaded in the background: send what is pending before exit.
+                await asyncio.to_thread(tracer.wait_for_futures)
     finally:
         await checkpoint_pool.close()
         await pool.close()

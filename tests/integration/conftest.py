@@ -1,7 +1,8 @@
 """Integration fixtures: every test module gets its own Postgres schema, dropped afterwards.
 
 Needs a reachable Postgres with pgvector (`make up`). The URL comes from TEST_DATABASE_URL
-or, by default, DATABASE_URL. If the database is not reachable the tests are skipped.
+or, by default, DATABASE_URL. If the database is not reachable the tests are skipped, unless
+REQUIRE_POSTGRES=1 (CI sets it): there a skip would hide a broken suite behind a green run.
 """
 
 import os
@@ -32,7 +33,10 @@ def database_url() -> str:
             conn.execute("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public")
             conn.commit()
     except psycopg.OperationalError as error:
-        pytest.skip(f"Postgres not reachable ({error.__class__.__name__}); run `make up`")
+        reason = f"Postgres not reachable ({error.__class__.__name__})"
+        if os.environ.get("REQUIRE_POSTGRES") == "1":
+            pytest.fail(f"{reason} and REQUIRE_POSTGRES=1")
+        pytest.skip(f"{reason}; run `make up`")
     return url
 
 

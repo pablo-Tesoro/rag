@@ -1,0 +1,361 @@
+{
+  "config": {
+    "split": "test",
+    "k": 5,
+    "modes": [
+      "dense",
+      "bm25",
+      "hybrid"
+    ],
+    "commit": "ca622ab",
+    "dataset_sha256": "203da56f65cc",
+    "embedding_model": "intfloat/multilingual-e5-small",
+    "chunk_max_tokens": 380,
+    "chunk_overlap_tokens": 60,
+    "retrieval_candidates": 20,
+    "rrf_k": 60
+  },
+  "gate": {
+    "applied": false,
+    "mode": "hybrid",
+    "passed": true,
+    "reasons": []
+  },
+  "summary": {
+    "dense": {
+      "cases": 7,
+      "recall": 0.8571428571428571,
+      "mrr": 0.7857142857142857,
+      "recall_by_category": {
+        "current_vs_obsolete": 1.0,
+        "exact_code": 1.0,
+        "factual": 1.0,
+        "injection": 1.0,
+        "multi_hop": 1.0,
+        "operation": 0.0
+      }
+    },
+    "bm25": {
+      "cases": 7,
+      "recall": 0.8571428571428571,
+      "mrr": 0.8571428571428571,
+      "recall_by_category": {
+        "current_vs_obsolete": 1.0,
+        "exact_code": 1.0,
+        "factual": 1.0,
+        "injection": 1.0,
+        "multi_hop": 1.0,
+        "operation": 0.0
+      }
+    },
+    "hybrid": {
+      "cases": 7,
+      "recall": 0.8571428571428571,
+      "mrr": 0.7857142857142857,
+      "recall_by_category": {
+        "current_vs_obsolete": 1.0,
+        "exact_code": 1.0,
+        "factual": 1.0,
+        "injection": 1.0,
+        "multi_hop": 1.0,
+        "operation": 0.0
+      }
+    }
+  },
+  "cases": [
+    {
+      "case_id": "FAC-03",
+      "category": "factual",
+      "mode": "dense",
+      "recall": 1.0,
+      "reciprocal_rank": 0.5,
+      "retrieved": [
+        "NOR-007 §2",
+        "NOR-007 §4",
+        "NOR-007 §5",
+        "NOR-006 §6",
+        "NOR-007 §3"
+      ]
+    },
+    {
+      "case_id": "FAC-05",
+      "category": "factual",
+      "mode": "dense",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-008 §2",
+        "NOR-005 §5",
+        "NOR-009 §5",
+        "NOR-009 §3",
+        "NOR-001 §3.1"
+      ]
+    },
+    {
+      "case_id": "COD-03",
+      "category": "exact_code",
+      "mode": "dense",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-003 §2",
+        "NOR-005 §2",
+        "NOR-005 §3",
+        "NOR-001 §4",
+        "NOR-003 §4"
+      ]
+    },
+    {
+      "case_id": "MUL-03",
+      "category": "multi_hop",
+      "mode": "dense",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-007 §3",
+        "NOR-010 §5",
+        "NOR-006 §2",
+        "NOR-009 §5",
+        "NOR-009 §2"
+      ]
+    },
+    {
+      "case_id": "VIG-02",
+      "category": "current_vs_obsolete",
+      "mode": "dense",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-005 §4",
+        "NOR-005 §1",
+        "NOR-005 §5",
+        "NOR-005 §2",
+        "NOR-005 §3"
+      ]
+    },
+    {
+      "case_id": "OPE-02",
+      "category": "operation",
+      "mode": "dense",
+      "recall": 0.0,
+      "reciprocal_rank": 0.0,
+      "retrieved": [
+        "NOR-010 §3",
+        "NOR-009 §5",
+        "NOR-010 §5",
+        "NOR-006 §2",
+        "NOR-006 §4"
+      ]
+    },
+    {
+      "case_id": "INY-02",
+      "category": "injection",
+      "mode": "dense",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-010 §3",
+        "NOR-009 §5",
+        "NOR-001 §3.2",
+        "NOR-002 §4",
+        "NOR-002 §2"
+      ]
+    },
+    {
+      "case_id": "FAC-03",
+      "category": "factual",
+      "mode": "bm25",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-007 §4",
+        "NOR-007 §2",
+        "NOR-007 §5",
+        "NOR-007 §3",
+        "NOR-006 §6"
+      ]
+    },
+    {
+      "case_id": "FAC-05",
+      "category": "factual",
+      "mode": "bm25",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-008 §2",
+        "NOR-007 §1",
+        "NOR-005 §5",
+        "NOR-010 §4",
+        "NOR-001 §5"
+      ]
+    },
+    {
+      "case_id": "COD-03",
+      "category": "exact_code",
+      "mode": "bm25",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-003 §2",
+        "NOR-005 §2",
+        "NOR-003 §5",
+        "NOR-005 §5",
+        "NOR-008 §3"
+      ]
+    },
+    {
+      "case_id": "MUL-03",
+      "category": "multi_hop",
+      "mode": "bm25",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-007 §3",
+        "NOR-010 §5",
+        "NOR-006 §2",
+        "NOR-008 §2",
+        "NOR-010 §3"
+      ]
+    },
+    {
+      "case_id": "VIG-02",
+      "category": "current_vs_obsolete",
+      "mode": "bm25",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-005 §4",
+        "NOR-005 §1",
+        "NOR-005 §2",
+        "NOR-003 §5",
+        "NOR-010 §2"
+      ]
+    },
+    {
+      "case_id": "OPE-02",
+      "category": "operation",
+      "mode": "bm25",
+      "recall": 0.0,
+      "reciprocal_rank": 0.0,
+      "retrieved": [
+        "NOR-009 §5",
+        "NOR-008 §5",
+        "NOR-010 §4",
+        "NOR-007 §3",
+        "NOR-013 §4"
+      ]
+    },
+    {
+      "case_id": "INY-02",
+      "category": "injection",
+      "mode": "bm25",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-010 §3",
+        "NOR-001 §1",
+        "NOR-002 §2",
+        "NOR-002 §3",
+        "NOR-001 §3.1"
+      ]
+    },
+    {
+      "case_id": "FAC-03",
+      "category": "factual",
+      "mode": "hybrid",
+      "recall": 1.0,
+      "reciprocal_rank": 0.5,
+      "retrieved": [
+        "NOR-007 §2",
+        "NOR-007 §4",
+        "NOR-007 §5",
+        "NOR-006 §6",
+        "NOR-007 §3"
+      ]
+    },
+    {
+      "case_id": "FAC-05",
+      "category": "factual",
+      "mode": "hybrid",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-008 §2",
+        "NOR-005 §5",
+        "NOR-001 §3.1",
+        "NOR-006 §2",
+        "NOR-009 §5"
+      ]
+    },
+    {
+      "case_id": "COD-03",
+      "category": "exact_code",
+      "mode": "hybrid",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-003 §2",
+        "NOR-005 §2",
+        "NOR-003 §4",
+        "NOR-005 §3",
+        "NOR-005 §5"
+      ]
+    },
+    {
+      "case_id": "MUL-03",
+      "category": "multi_hop",
+      "mode": "hybrid",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-007 §3",
+        "NOR-010 §5",
+        "NOR-006 §2",
+        "NOR-008 §2",
+        "NOR-009 §5"
+      ]
+    },
+    {
+      "case_id": "VIG-02",
+      "category": "current_vs_obsolete",
+      "mode": "hybrid",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-005 §4",
+        "NOR-005 §1",
+        "NOR-005 §2",
+        "NOR-005 §5",
+        "NOR-003 §5"
+      ]
+    },
+    {
+      "case_id": "OPE-02",
+      "category": "operation",
+      "mode": "hybrid",
+      "recall": 0.0,
+      "reciprocal_rank": 0.0,
+      "retrieved": [
+        "NOR-009 §5",
+        "NOR-010 §3",
+        "NOR-007 §3",
+        "NOR-010 §5",
+        "NOR-006 §2"
+      ]
+    },
+    {
+      "case_id": "INY-02",
+      "category": "injection",
+      "mode": "hybrid",
+      "recall": 1.0,
+      "reciprocal_rank": 1.0,
+      "retrieved": [
+        "NOR-010 §3",
+        "NOR-002 §2",
+        "NOR-001 §1",
+        "NOR-002 §4",
+        "NOR-001 §3.1"
+      ]
+    }
+  ]
+}

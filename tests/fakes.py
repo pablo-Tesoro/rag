@@ -3,16 +3,17 @@
 import asyncio
 import hashlib
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.callbacks import BaseCallbackHandler, CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ConfigDict, Field
@@ -22,6 +23,10 @@ from bank_assistant.incidents.repository import Incident, IncidentRequest
 from bank_assistant.retrieval import RetrievalMode
 from bank_assistant.retrieval.lexical import lexical_terms
 from bank_assistant.retrieval.retriever import RetrievedChunk
+from evals.judge import Judgement
+from evals.metrics.agent import JudgeScores
+from evals.runner import CaseRun
+from evals.schema import EvalCase
 
 
 def whitespace_token_count(text: str) -> int:
@@ -74,9 +79,11 @@ class ScriptedChatModel(BaseChatModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    script: list[AIMessage]
-    received: list[list[BaseMessage]] = Field(default_factory=list)
-    bound_tools: list[dict[str, Any]] = Field(default_factory=list)
+    # Out of the repr: a traced run sends the model's repr as its configuration, and a real
+    # model's configuration never holds conversation content.
+    script: list[AIMessage] = Field(repr=False)
+    received: list[list[BaseMessage]] = Field(default_factory=list, repr=False)
+    bound_tools: list[dict[str, Any]] = Field(default_factory=list, repr=False)
 
     @property
     def _llm_type(self) -> str:
@@ -97,6 +104,55 @@ class ScriptedChatModel(BaseChatModel):
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> "ScriptedChatModel":
         self.bound_tools = [convert_to_openai_tool(tool) for tool in tools]
         return self
+
+
+class RuleBasedChatModel(BaseChatModel):
+    """Stands in for the LLM when every dataset case must run without a script per case.
+
+    On a new question it looks up the operation it mentions (or proposes an incident if it
+    asks to open one) or searches the policies with the question itself. Once a tool has
+    answered, it replies with `responder`, citing the first document it retrieved. It says
+    nothing about answer quality: it exercises the wiring.
+    """
+
+    @property
+    def _llm_type(self) -> str:
+        return "rule-based"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self._reply(messages))])
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> "RuleBasedChatModel":
+        return self
+
+    @staticmethod
+    def _reply(messages: list[BaseMessage]) -> AIMessage:
+        last = messages[-1]
+        if isinstance(last, HumanMessage):
+            question = last.text
+            operation = re.search(r"OP-\d{6}", question)
+            if operation and "abre una incidencia" in question.lower():
+                category = "cargo_duplicado" if "dos veces" in question else "importe_incorrecto"
+                return tool_call(
+                    "abrir_incidencia",
+                    id_operacion=operation.group(),
+                    categoria=category,
+                    descripcion="Incidencia comunicada por el cliente en oficina",
+                )
+            if operation:
+                return tool_call("consultar_operacion", id_operacion=operation.group())
+            return tool_call("buscar_normativa", consulta=question[:500])
+        results = "\n".join(m.text for m in messages if isinstance(m, ToolMessage))
+        cited = re.search(r'<documento id="(NOR-\d{3})" seccion="([\d.]+)"', results)
+        if cited is None:
+            return answer("No he encontrado información.", sin_evidencia=True)
+        return answer("Respuesta de prueba.", citas=[(cited.group(1), cited.group(2))])
 
 
 def tool_call(name: str, call_id: str | None = None, **args: Any) -> AIMessage:
@@ -209,3 +265,78 @@ def sample_operations() -> FakeOperations:
             "OP-222222": sample_operation("OP-222222", "0412"),
         }
     )
+
+
+# ------------------------------------------------------------------------------ eval fakes
+
+
+def make_case(**overrides: Any) -> EvalCase:
+    """A valid factual evaluation case; override any field."""
+    data: dict[str, Any] = {
+        "id": "TST-01",
+        "split": "dev",
+        "category": "factual",
+        "critical": False,
+        "employee_id": "EMP-001",
+        "question": "¿Cuál es el límite?",
+        "reference_answer": "5.000 € por cliente y día.",
+        "key_facts": ["5.000 € por cliente y día"],
+        "relevant": [{"doc_id": "NOR-005", "section": "2"}],
+    }
+    data.update(overrides)
+    return EvalCase.model_validate(data)
+
+
+def approval_case(decision: str = "approve", **overrides: Any) -> EvalCase:
+    return make_case(
+        **{
+            "id": "APR-99",
+            "category": "human_approval",
+            "critical": True,
+            "question": "Abre una incidencia por cargo duplicado en OP-111111",
+            "key_facts": ["Incidencia registrada con su número"],
+            "relevant": [],
+            "expected_tool_calls": [
+                {
+                    "name": "abrir_incidencia",
+                    "args": {"id_operacion": "OP-111111", "categoria": "cargo_duplicado"},
+                }
+            ],
+            "approval": {"decision": decision},
+            **overrides,
+        }
+    )
+
+
+class FixedJudge:
+    """A judge that always finds the answer correct and grounded (or always fails)."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.judged: list[str] = []
+
+    async def judge(self, case: EvalCase, run: CaseRun) -> Judgement:
+        self.judged.append(f"{case.id}#{run.repeat}")
+        if self.fail:
+            raise TimeoutError("judge timed out")
+        return Judgement(JudgeScores(True, True, 1.0), input_tokens=50, output_tokens=5)
+
+
+class RootRunRecorder(BaseCallbackHandler):
+    """Records the id and metadata of every root run, as a tracer would receive them."""
+
+    def __init__(self) -> None:
+        self.roots: list[tuple[UUID, dict[str, Any]]] = []
+
+    def on_chain_start(
+        self,
+        serialized: dict[str, Any] | None,
+        inputs: Any,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if parent_run_id is None:
+            self.roots.append((run_id, dict(metadata or {})))

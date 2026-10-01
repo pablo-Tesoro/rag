@@ -1,0 +1,82 @@
+{
+  "config": {
+    "commit": "f69b010",
+    "judge_model": "google_genai:gemini-3.1-flash-lite",
+    "judge_prompt": "eval_judge@v1#79e596561c73"
+  },
+  "agreement": 1.0,
+  "controls": [
+    {
+      "control": "correct",
+      "case_id": "COD-01",
+      "expected": {
+        "correct": true,
+        "grounded": true
+      },
+      "judged": {
+        "correct": true,
+        "grounded": true
+      },
+      "agrees": true,
+      "missing_facts": [],
+      "unsupported_claims": [],
+      "analysis": "La respuesta del asistente identifica correctamente la comisión de mantenimiento y la condición de exención basándose en la evidencia proporcionada en la normativa NOR-001. No hay contradicciones ni afirmaciones adicionales que carezcan de soporte documental."
+    },
+    {
+      "control": "missing_fact",
+      "case_id": "COD-01",
+      "expected": {
+        "correct": false,
+        "grounded": true
+      },
+      "judged": {
+        "correct": false,
+        "grounded": true
+      },
+      "agrees": true,
+      "missing_facts": [
+        "Exenta con nómina domiciliada de al menos 1.200 € al mes"
+      ],
+      "unsupported_claims": [],
+      "analysis": "El asistente informa correctamente sobre la comisión de mantenimiento de 4,50 € al mes, lo que cubre el primer hecho clave. Sin embargo, no menciona cómo el cliente puede evitar dicha comisión, omitiendo por completo el segundo hecho clave sobre la exención con una nómina de al menos 1.200 €."
+    },
+    {
+      "control": "wrong_figure",
+      "case_id": "COD-01",
+      "expected": {
+        "correct": false,
+        "grounded": false
+      },
+      "judged": {
+        "correct": false,
+        "grounded": false
+      },
+      "agrees": true,
+      "missing_facts": [
+        "Exenta con nómina domiciliada de al menos 1.200 € al mes"
+      ],
+      "unsupported_claims": [
+        "domicilia una nómina de al menos 600 € al mes"
+      ],
+      "analysis": "La respuesta identifica correctamente el importe de la comisión (4,50 €), pero se equivoca en la condición de exención. La evidencia NOR-001, sección 5, especifica que la nómina debe ser de al menos 1.200 € al mes, mientras que la respuesta indica erróneamente que es de 600 €."
+    },
+    {
+      "control": "invented_claim",
+      "case_id": "COD-01",
+      "expected": {
+        "correct": true,
+        "grounded": false
+      },
+      "judged": {
+        "correct": true,
+        "grounded": false
+      },
+      "agrees": true,
+      "missing_facts": [],
+      "unsupported_claims": [
+        "los clientes mayores de 65 años están siempre exentos"
+      ],
+      "analysis": "El asistente identifica correctamente la comisión y la condición de la nómina. Sin embargo, añade una exención adicional para mayores de 65 años que no aparece en ninguna parte de la evidencia proporcionada."
+    }
+  ]
+}

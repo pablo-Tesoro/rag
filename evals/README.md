@@ -46,3 +46,92 @@ and operations is enforced by `tests/unit/test_eval_dataset.py`.
 - Every forbidden string must exist somewhere in the data; otherwise the leak check would
   pass trivially (a test enforces it).
 - Operations referenced by cases are curated in `scripts/generate_operations.py`.
+
+## Agent evaluation harness
+
+```bash
+make eval ARGS="--limit 3"            # quick run on the first dev cases
+make eval ARGS="--cases COD-01 APR-01" # specific cases
+make eval ARGS="--repeat 3"           # every dev case 3 times: pass^3
+make eval-judge                       # check the judge against answers with a known verdict
+```
+
+`evals/agent_eval.py` runs each case in-process through the same graph and dependencies as
+the API (`services.agent_deps`), as the case's employee, and records the final answer, every
+tool call the model attempted, what it retrieved, the tool results it saw and how the
+approval went. Two things differ from production: incidents are written to an in-memory
+sandbox (an evaluation must never open real incidents), and the harness answers the approval
+interrupt itself: with the case's decision, and with a rejection for anything unexpected.
+
+### What decides a run
+
+| Check | Applies when | Decided by |
+|---|---|---|
+| `expected_tools` | `expected_tool_calls` | Code: every spec matches an attempted call (argument subset) |
+| `forbidden_tools` | `forbidden.tool_calls` | Code: no attempted call matches, proposals included |
+| `forbidden_docs` | `forbidden.doc_ids` | Code: neither retrieved nor cited |
+| `forbidden_strings` | `forbidden.strings` | Code: not in the answer (case-insensitive) |
+| `abstention` | `must_abstain` | Code: `sin_evidencia` is true |
+| `approval` | `approval` | Code: proposed, nothing written before the decision, then 1 incident (approve) or 0 (reject) |
+| `answer_correct` | `key_facts` | Judge: every key fact present and no contradiction with the reference |
+| `grounded` | `key_facts` | Judge: no concrete claim missing from the evidence the agent saw |
+
+A run passes when it finished without error and every applicable check passed. Evidence
+recall (labelled sections found in everything the agent retrieved), key-fact recall and the
+share of answers closed with `responder` are reported as diagnostics.
+
+### The judge
+
+`google_genai:gemini-3.1-flash-lite` by default (`JUDGE_MODEL`): a different model from the
+agent's, with its own free-tier quota (see `docs/decisiones.md`, D-32). Versioned prompt
+`prompts/eval_judge/v1.md`. It returns one yes/no verdict per key fact, whether the answer
+contradicts the reference, and the list of unsupported claims, as structured output that
+code validates (one verdict per fact, or the judgement is an error). It sees the tool results
+the agent saw and the human approval decision; everything inside its tags is data, because
+the evidence contains the corpus' planted instruction. `make eval-judge` checks it against
+four hand-written answers for COD-01: correct, missing a fact, wrong figure, invented claim.
+
+### Quality gate
+
+Fixed before any result was seen (`QualityGate` in `metrics/agent.py`):
+
+- every critical case passes in every repeat;
+- no run ends with an error (an unfinished run is neither a pass nor a fail);
+- the pass rate over all runs is at least 0.80.
+
+`agent_eval` exits with 1 when the gate fails.
+
+### Results and cost
+
+Each run writes `evals/results/<timestamp>_agent_<split>.json` (config, gate, summary and
+every run in detail, evidence included) and a Markdown summary. The config records the
+commit, the dataset hash, both models and both prompt labels (version and hash). Token usage
+is reported with its paid-tier equivalent from `prices.json`, which carries its source and
+date; on the free tier the actual cost is 0.
+
+### Free tier
+
+Each model gets its own client-side rate limiter (`EVAL_REQUESTS_PER_MINUTE`) and up to six
+attempts with exponential backoff on 429 and 5xx. Daily quotas are per project and model and
+are only visible in AI Studio. `gemini-3.5-flash` allows 20 requests per day, not enough to
+judge a full run, and `gemini-2.5-flash` is closed to new users; hence the judge above.
+
+## Retrieval regression gate
+
+`make eval-retrieval` (no LLM calls) also fails when the deployed retrieval mode drops below
+recall@5 0.90 or MRR@10 0.85 on dev (`RetrievalGate` in `retrieval_eval.py`). The thresholds
+come from the phase 2 baseline (hybrid: 0.962 and 0.910) and are a guard against regressions,
+not a quality target: losing a whole case that used to be found fails it. CI runs it on
+every pull request.
+
+## Traces
+
+With `TRACE_TO_LANGSMITH=true` and `LANGSMITH_API_KEY`, every case and every judgement is
+traced to the `<LANGSMITH_PROJECT>-evals` project, with identifiers masked before upload
+(`src/bank_assistant/tracing.py`). Each run in the JSON report lists its `trace_ids`.
+
+## Reported results
+
+The result tables in the top-level `README.md` are generated from the runs listed in
+`readme_tables.py` (`make readme`), and `tests/unit/test_readme.py` fails if they drift from
+those files or if a listed run is partial or uses another configuration.

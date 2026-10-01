@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -18,6 +19,7 @@ from bank_assistant.services import Services
 from tests.fakes import (
     FakeIncidents,
     FakeSearch,
+    RootRunRecorder,
     ScriptedChatModel,
     answer,
     chunk,
@@ -30,11 +32,18 @@ PROMPTS = Path(__file__).resolve().parents[2] / "prompts"
 
 
 class FakeServices:
-    def __init__(self, script: list[AIMessage], ready: bool = True, llm: bool = True) -> None:
+    def __init__(
+        self,
+        script: list[AIMessage],
+        ready: bool = True,
+        llm: bool = True,
+        callbacks: list[BaseCallbackHandler] | None = None,
+    ) -> None:
         self.llm = ScriptedChatModel(script=script)
         self.incidents = FakeIncidents()
         self.ready = ready
         self.llm_available = llm
+        self.callbacks = callbacks or []
 
     @asynccontextmanager
     async def factory(self, settings: Settings) -> AsyncIterator[Services]:
@@ -60,6 +69,7 @@ class FakeServices:
             prompt=prompt,
             readiness=readiness,
             unavailable_reason=None if self.llm_available else "LLM not configured",
+            callbacks=self.callbacks,
         )
 
 
@@ -71,9 +81,12 @@ def make_client() -> Iterator[MakeClient]:
     clients: list[TestClient] = []
 
     def make(
-        script: list[AIMessage], ready: bool = True, llm: bool = True
+        script: list[AIMessage],
+        ready: bool = True,
+        llm: bool = True,
+        callbacks: list[BaseCallbackHandler] | None = None,
     ) -> tuple[TestClient, FakeServices]:
-        fake = FakeServices(script, ready, llm)
+        fake = FakeServices(script, ready, llm, callbacks)
         client = TestClient(create_app(fake.factory))
         client.__enter__()  # runs the lifespan
         clients.append(client)
@@ -198,3 +211,17 @@ def test_without_an_llm_the_app_is_alive_but_not_ready(make_client: MakeClient) 
     assert chat.status_code == 503
     assert "LLM not configured" in chat.json()["detail"]
     assert "validation error" not in chat.json()["detail"]
+
+
+def test_each_turn_carries_the_tracing_handlers_and_no_raw_employee_id(
+    make_client: MakeClient,
+) -> None:
+    recorder = RootRunRecorder()
+    client, _ = make_client([answer("5.000 € al día.")], callbacks=[recorder])
+
+    body = client.post("/chat", json={"message": "¿Límite?"}, headers=EMP1).json()
+
+    [(_, metadata)] = recorder.roots
+    assert metadata["thread_id"] == body["thread_id"]
+    assert metadata["prompt_version"].startswith("agent_system@v1#")
+    assert "EMP-001" not in {str(value) for value in metadata.values()}
