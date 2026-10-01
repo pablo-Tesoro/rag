@@ -495,3 +495,36 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
     más fácil que la del agente), con los controles de `make eval-judge` (4 de 4 de acuerdo,
     `evals/results/20261001T095702Z_judge_controls.json`) y con la revisión manual de cada
     fallo.
+
+## D-33. Abstenerse y citar la remisión: contrato independiente y prompt v2
+
+- **Contexto.** En la línea base de dev, PER-01 (crítico) falló la abstención sin ninguna
+  fuga. El agente no tenía la respuesta, la normativa pública (NOR-002 §5) solo remite a un
+  documento restringido, y el contrato le obligaba a elegir entre abstenerse y citar esa
+  remisión:
+  - la regla 3 del prompt v1 dice «marca `sin_evidencia`… sin citas»;
+  - con `sin_evidencia`, el grafo vaciaba las citas (D-20).
+  En la fase 3 eligió abstenerse; en la línea base, citar.
+- **Alternativas.**
+  - Cambiar la etiqueta de PER-01: sería ajustar el dataset al modelo.
+  - Solo cambiar el prompt: la cita de la remisión seguiría perdiéndose en el grafo.
+- **Elección.**
+  - `sin_evidencia` y `citas` pasan a ser independientes. `sin_evidencia` dice si la
+    evidencia responde a la pregunta, y `citas` respalda lo que afirma el texto.
+  - Las citas se validan igual haya o no evidencia: una cita no recuperada vuelve al modelo
+    una vez y, si persiste, se descarta. Esto sustituye la regla de D-20 de vaciar las citas.
+  - Prompt `v2`: solo cambia la regla 3. Cuando lo único que hay es una remisión a un
+    documento que no aparece en los resultados, el agente debe abstenerse y citar la sección
+    que hace la remisión. El tratamiento de tú queda fuera, para que el efecto medido tenga
+    una sola causa.
+- **Medición, fijada antes de ejecutar.**
+  - Antes del cambio (commit de este registro): v1 con `--repeat 3` sobre los cuatro casos
+    que toca el contrato: PER-01, PER-03, SIN-01 y SIN-03.
+  - Después del cambio: v2 con `--repeat 3` sobre todo dev.
+  - Se adopta v2 si PER-01 pasa en 3 de 3, el subconjunto no empeora frente a v1 y la puerta
+    de calidad pasa en dev con v2.
+  - Si la puerta falla por un caso ajeno al cambio, se informa como hallazgo de
+    consistencia y no se toca la puerta.
+- **Trade-offs.** No se repite v1 en todo dev con `--repeat 3`: la cuota diaria del tier
+  gratuito no da para las dos ejecuciones completas. La comparación directa se limita a los
+  casos afectados; el resto de dev se compara con la línea base de una repetición.
