@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.exceptions import ModelInvalidRequestError, ModelRateLimitError
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from bank_assistant.agent.graph import AgentDeps, build_graph
-from bank_assistant.api.app import create_app
+from bank_assistant.api.app import RETRY_AFTER_S, create_app
 from bank_assistant.config import Settings
 from bank_assistant.identity import EmployeeDirectory
 from bank_assistant.prompts import load_prompt
@@ -34,7 +35,7 @@ PROMPTS = Path(__file__).resolve().parents[2] / "prompts"
 class FakeServices:
     def __init__(
         self,
-        script: list[AIMessage],
+        script: list[AIMessage | Exception],
         ready: bool = True,
         llm: bool = True,
         callbacks: list[BaseCallbackHandler] | None = None,
@@ -81,7 +82,7 @@ def make_client() -> Iterator[MakeClient]:
     clients: list[TestClient] = []
 
     def make(
-        script: list[AIMessage],
+        script: list[AIMessage | Exception],
         ready: bool = True,
         llm: bool = True,
         callbacks: list[BaseCallbackHandler] | None = None,
@@ -211,6 +212,25 @@ def test_without_an_llm_the_app_is_alive_but_not_ready(make_client: MakeClient) 
     assert chat.status_code == 503
     assert "LLM not configured" in chat.json()["detail"]
     assert "validation error" not in chat.json()["detail"]
+
+
+def test_a_provider_rate_limit_asks_the_client_to_retry_later(make_client: MakeClient) -> None:
+    client, _ = make_client([ModelRateLimitError("429 RESOURCE_EXHAUSTED")])
+
+    response = client.post("/chat", json={"message": "¿Límite?"}, headers=EMP1)
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == str(RETRY_AFTER_S)
+    assert "RESOURCE_EXHAUSTED" not in response.text  # provider details stay out
+
+
+def test_a_request_the_provider_rejects_is_not_worth_retrying(make_client: MakeClient) -> None:
+    client, _ = make_client([ModelInvalidRequestError("400 INVALID_ARGUMENT")])
+
+    response = client.post("/chat", json={"message": "¿Límite?"}, headers=EMP1)
+
+    assert response.status_code == 502
+    assert "Retry-After" not in response.headers
 
 
 def test_each_turn_carries_the_tracing_handlers_and_no_raw_employee_id(

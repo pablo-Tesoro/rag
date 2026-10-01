@@ -20,6 +20,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from langchain_core.exceptions import ModelError
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphRecursionError
@@ -42,6 +43,10 @@ from bank_assistant.services import AgentGraph, Services, open_services
 log = logging.getLogger(__name__)
 
 ServicesFactory = Callable[[Settings], AbstractAsyncContextManager[Services]]
+
+# Sent when the LLM provider fails in a way that a later retry may fix (a rate limit, an
+# outage). The free tier counts requests per minute, so half a minute is a sensible wait.
+RETRY_AFTER_S = 30
 
 
 def create_app(services_factory: ServicesFactory | None = None) -> FastAPI:
@@ -193,6 +198,19 @@ async def _run_turn(
         )
         _log_turn(services, employee, thread_id, response, started, error=type(error).__name__)
         return response
+    except ModelError as error:
+        # The provider failed after its client's own retries. That is the provider's state,
+        # not a bug of ours: the caller is told whether trying again later can work.
+        _log_turn(services, employee, thread_id, response, started, error=type(error).__name__)
+        if error.is_retryable:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "The language model is busy or unavailable: try again later.",
+                headers={"Retry-After": str(RETRY_AFTER_S)},
+            ) from error
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "The language model provider rejected the request."
+        ) from error
 
     interrupts = result.get("__interrupt__")
     if interrupts:
