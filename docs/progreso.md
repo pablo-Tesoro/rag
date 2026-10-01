@@ -11,7 +11,7 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 | 3 | Agente y API | ✅ Terminada y probada con Gemini |
 | 4 | Evaluación (harness, métricas, puerta de calidad) | ✅ Terminada: prompt v2 adoptado, puerta PASS en dev con `--repeat 3` |
 | 5 | Trazas, Docker y CI | ✅ Terminada: CI en verde en GitHub; `eval.yml` pendiente de `main` y del secreto |
-| 6 | Ablación y README | ⏳ Pendiente |
+| 6 | Ablación y README | ✅ Terminada: ablación, única ejecución de test y README generado |
 
 ## Fase 1: qué hay
 
@@ -255,14 +255,45 @@ registraron en D-33 antes de ejecutar nada (commit `927d40d`).
   PER-01. Se adopta porque elimina la contradicción del contrato sin empeorar nada medible.
 - El split de test sigue sin ejecutarse: se reserva para el informe final.
 
+## Fase 6: ablación, test y README
+
+- Protocolo fijado antes de ejecutar (D-36, commit `a207f86`).
+- Ablación en dev con el agente (prompt v2), una ejecución por modo frente a las tres de
+  hybrid:
+  - dense: 17 de 20, puerta FAIL (PER-01 y PER-03).
+  - bm25: 19 de 20, puerta PASS; FAC-02 falla por no recuperar NOR-009 §2.
+  - hybrid: 58 de 60. Se mantiene.
+- Revisión manual de los fallos de la ablación:
+  - FAC-02 (bm25): fallo de recuperación.
+  - OPE-03 (dense): el modelo escribe mal el importe («1.2400,00»).
+  - PER-01 (dense): vuelve a explicar la remisión sin marcar `sin_evidencia`. Con v2,
+    PER-01 pasa 4 de 5 en total: el cambio de contrato no elimina del todo el fallo.
+  - PER-03 (dense): no dice que la comunicación va a Cumplimiento.
+- Test, una sola vez en `ca622ab` con la configuración final: puerta PASS, 30 de 30
+  ejecuciones y pass^3 de 1,00. Revisé a mano las diez respuestas contra el corpus y los
+  datos del core: todas son correctas, y APR-02 rechaza tratando al empleado de tú.
+- Recuperación sin LLM en test: recall@5 de 0,86 en los tres modos. OPE-02 solo nombra la
+  operación; el agente sí encuentra la sección después de consultarla.
+- La ejecución bm25 quedó registrada como `a207f86-dirty` solo porque los resultados de
+  dense aún no estaban en un commit. `git_commit` ya ignora `evals/results/`, con un test.
+- README final en inglés: qué hace, resultados, arquitectura, invariantes de seguridad,
+  arranque, evaluación, decisiones clave y limitaciones. Las tablas se generan con
+  `make readme` a partir de los ficheros de `evals/results/` y un test impide que se
+  desfasen (D-37).
+
 ## Siguiente paso
 
-1. Fase 6: ablación de los modos de recuperación con el agente y README final con las cifras
-   de `evals/results/`, incluida la única ejecución del split de test.
-2. Candidatos a un prompt `v3`, que habría que medir:
+El plan de seis fases está completo. Posibles continuaciones:
+
+1. Un prompt `v3` con las observaciones pendientes, medido con el mismo protocolo:
    - no presentar como hecho el motivo probable de una retención;
    - nombrar categoría y prioridad por separado;
-   - tratar al empleado de tú.
+   - tratar al empleado de tú;
+   - reforzar la abstención de PER-01.
+2. Más casos en el dataset, sobre todo de abstención y multi-hop, para que las diferencias
+   sean medibles.
+3. Ejecutar `eval.yml` cuando esté en `main` con el secreto, y subir de versión las acciones
+   de GitHub (aviso de Node 20).
 
 ## Fase 5: qué hay
 

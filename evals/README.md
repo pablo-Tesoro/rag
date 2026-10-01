@@ -129,3 +129,9 @@ every pull request.
 With `TRACE_TO_LANGSMITH=true` and `LANGSMITH_API_KEY`, every case and every judgement is
 traced to the `<LANGSMITH_PROJECT>-evals` project, with identifiers masked before upload
 (`src/bank_assistant/tracing.py`). Each run in the JSON report lists its `trace_ids`.
+
+## Reported results
+
+The result tables in the top-level `README.md` are generated from the runs listed in
+`readme_tables.py` (`make readme`), and `tests/unit/test_readme.py` fails if they drift from
+those files or if a listed run is partial or uses another configuration.

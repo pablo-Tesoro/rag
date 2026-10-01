@@ -636,3 +636,35 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
     verla. Si sale peor que dev, se documenta y se explica, sin repetir hasta que salga bien.
   - `make eval-ablation` recorre los tres modos. En esta ejecución solo se lanzan dense y
     bm25, por el motivo de cuota indicado.
+- **Resultado.**
+  - Ablación (`20261001T121247Z` dense y `20261001T121759Z` bm25, frente a hybrid
+    `20261001T103057Z`):
+    - dense pasa 17 de 20 y falla la puerta (PER-01 y PER-03, críticos);
+    - bm25 pasa 19 de 20; FAC-02 falla porque no recupera NOR-009 §2, la misma debilidad
+      léxica de la fase 2;
+    - hybrid sigue siendo el mejor en recall sin LLM y en tasa de aprobados, así que se
+      mantiene.
+    - Con una ejecución por modo, solo el fallo de FAC-02 se puede atribuir a la
+      recuperación; el resto es variabilidad del modelo.
+  - Test, ejecutado una vez en `ca622ab` (`20261001T122733Z_agent_test.*` y
+    `20261001T121958Z_retrieval_test.*`): puerta PASS, 30 de 30 ejecuciones y pass^3 de
+    1,00. La revisión manual de las respuestas confirma el resultado.
+  - Con 10 casos, un resultado perfecto significa que ninguno falla, no que la tasa de error
+    sea cero. Dev es la estimación más informativa.
+  - La recuperación sin LLM en test falla OPE-02 en los tres modos: la pregunta solo nombra
+    la operación. El agente encuentra la sección tras consultarla (recall de evidencia 1,00):
+    es la salvedad de D-16 vista en un caso real.
+
+## D-37. Las cifras del README se generan a partir de los resultados guardados
+
+- **Contexto.** La regla del proyecto es que toda cifra del README sale de una ejecución
+  guardada en `evals/results/`. Escrita a mano, esa regla depende de la disciplina y una
+  cifra puede quedarse desfasada sin que nadie lo note.
+- **Elección.**
+  - `evals/readme_tables.py` genera las tablas del README entre dos marcadores a partir de
+    las ejecuciones listadas en `SOURCES`. Se regeneran con `make readme`.
+  - `tests/unit/test_readme.py` falla si el README no coincide con lo que generan esos
+    ficheros, y si alguna fuente es una ejecución parcial o con otra configuración.
+  - El texto escrito a mano no lleva cifras medidas: solo las explica.
+- **Trade-offs.** Cambiar una cifra exige apuntar a otra ejecución guardada, que es justo lo
+  que se busca. El formato de las tablas queda en código y no en el Markdown.

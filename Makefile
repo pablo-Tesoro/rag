@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs data lint format typecheck test check ingest ingest-local eval-retrieval eval eval-judge eval-ablation
+.PHONY: help setup up down logs data lint format typecheck test check ingest ingest-local eval-retrieval eval eval-judge eval-ablation readme
 
 UV ?= uv
 
@@ -55,6 +55,9 @@ eval: ## Agent eval on dev with the real LLM (rate limited). Flags: make eval AR
 
 eval-judge: ## Check the LLM judge against answers whose verdict is known (4 judge calls)
 	$(UV) run python -m evals.judge_controls
+
+readme: ## Regenerate the README result tables from the runs listed in evals/readme_tables.py
+	$(UV) run python -m evals.readme_tables --write
 
 eval-ablation: ## Agent eval on dev for each retrieval mode (LLM calls). Flags: ARGS="--repeat 3"
 	@# An ablation compares modes: each run reports its gate verdict, none stops the loop.
