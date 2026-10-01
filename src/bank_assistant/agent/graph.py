@@ -351,9 +351,11 @@ def build_graph(
                 "final_answer": _fallback_answer("No he podido responder.", "respuesta_invalida"),
             }
 
+        # Citations are checked the same way whether or not the answer abstains: an
+        # abstention may cite the public section that refers to an inaccessible document.
         retrieved = state.get("retrieved") or {}
         unsupported = [c for c in answer.citas if not citation_is_supported(c, retrieved)]
-        if unsupported and not answer.sin_evidencia and can_fix:
+        if unsupported and can_fix:
             listed = ", ".join(f"{c.documento} §{c.seccion}" for c in unsupported)
             outcome = ToolOutcome(
                 f"Error: estas citas no están entre los documentos recuperados: {listed}. "
@@ -363,14 +365,14 @@ def build_graph(
             )
             return {"messages": [*ignored, _tool_message(answer_call, outcome)]}
 
-        citas = [] if answer.sin_evidencia else [c for c in answer.citas if c not in unsupported]
+        citas = [c for c in answer.citas if c not in unsupported]
         final = {
             "texto": answer.texto,
             "citas": [c.model_dump() for c in citas],
             "sin_evidencia": answer.sin_evidencia,
             "terminacion": "respuesta",
         }
-        if unsupported and not answer.sin_evidencia:
+        if unsupported:
             final["citas_descartadas"] = [c.model_dump() for c in unsupported]
         delivered = _tool_message(answer_call, ToolOutcome("Respuesta entregada."))
         return {"messages": [*ignored, delivered], "final_answer": final}

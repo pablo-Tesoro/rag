@@ -113,11 +113,34 @@ async def test_system_prompt_and_employee_context_are_sent_to_the_model() -> Non
     assert "oficina 0101" in str(system.content)
 
 
-async def test_no_evidence_answers_carry_no_citations() -> None:
-    harness = Harness([answer("No lo sé.", citas=[("NOR-001", "1")], sin_evidencia=True)])
+async def test_an_abstention_keeps_the_citation_of_a_referral() -> None:
+    referral = chunk("NOR-002", "5", "Se analiza según NOR-011, de acceso restringido.")
+    harness = Harness(
+        [
+            tool_call("buscar_normativa", consulta="scoring mínimo"),
+            answer("Está en NOR-011, restringido.", citas=[("NOR-002", "5")], sin_evidencia=True),
+        ],
+        search=FakeSearch([referral]),
+    )
+
+    result = await harness.ask("¿Qué scoring mínimo hace falta?")
+
+    assert result["final_answer"]["sin_evidencia"] is True
+    assert result["final_answer"]["citas"] == [{"documento": "NOR-002", "seccion": "5"}]
+
+
+async def test_an_abstention_citing_something_not_retrieved_is_corrected_like_any_answer() -> None:
+    harness = Harness(
+        [
+            answer("No lo sé.", citas=[("NOR-001", "1")], sin_evidencia=True),
+            answer("No lo sé.", sin_evidencia=True),
+        ]
+    )
 
     result = await harness.ask("¿Días de teletrabajo?")
 
+    correction = [m for m in harness.tool_messages(result) if m.status == "error"]
+    assert "NOR-001 §1" in str(correction[0].content)
     assert result["final_answer"]["sin_evidencia"] is True
     assert result["final_answer"]["citas"] == []
 
