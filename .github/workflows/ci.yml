@@ -1,0 +1,137 @@
+# Deterministic checks on every pull request and on main. No LLM calls: the agent evaluation
+# needs the free-tier Gemini quota and runs on demand (eval.yml).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.21" # same as the Dockerfile
+  PYTHON_VERSION: "3.12"
+  DATABASE_URL: postgresql://olvessa:olvessa-dev-only@localhost:5432/olvessa
+
+jobs:
+  check:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      db:
+        image: pgvector/pgvector:0.8.6-pg17
+        env:
+          POSTGRES_USER: olvessa
+          POSTGRES_PASSWORD: olvessa-dev-only
+          POSTGRES_DB: olvessa
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olvessa -d olvessa"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      # Integration tests skip without Postgres; here a skip must fail the run instead.
+      REQUIRE_POSTGRES: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - name: Install (the lockfile must be up to date)
+        run: uv sync --all-groups --locked
+      - name: ruff, mypy and pytest
+        run: make check
+
+  retrieval:
+    name: Retrieval regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      db:
+        image: pgvector/pgvector:0.8.6-pg17
+        env:
+          POSTGRES_USER: olvessa
+          POSTGRES_PASSWORD: olvessa-dev-only
+          POSTGRES_DB: olvessa
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olvessa -d olvessa"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-intfloat-multilingual-e5-small
+      - name: Ingest the corpus with the real embedding model
+        run: make ingest-local
+      - name: recall@5 and MRR per mode; fails if the deployed mode regresses
+        run: make eval-retrieval
+      - name: Report
+        if: always()
+        run: |
+          report=$(ls -t evals/results/*_retrieval_dev.md 2>/dev/null | head -n 1)
+          if [ -n "$report" ]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retrieval-eval
+          path: evals/results/*_retrieval_dev.*
+          if-no-files-found: ignore
+
+  docker:
+    name: Docker image and stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image and start db + app (waits for the healthchecks)
+        run: docker compose up -d --build --wait
+      - name: Alive, and not ready without data or an LLM key
+        run: |
+          curl -fsS http://localhost:8000/healthz
+          status=$(curl -s -o readyz.json -w '%{http_code}' http://localhost:8000/readyz)
+          cat readyz.json
+          test "$status" = 503
+      - name: Load the corpus and the core banking inside the stack
+        run: make ingest
+      - name: Everything but the LLM is ready, and chat refuses with a clear reason
+        run: |
+          curl -s http://localhost:8000/readyz | tee readyz.json
+          python3 - <<'PY'
+          import json
+          checks = json.load(open("readyz.json"))["checks"]
+          expected = {
+              "database": True,
+              "index_loaded": True,
+              "core_banking_loaded": True,
+              "llm_configured": False,
+          }
+          assert checks == expected, checks
+          PY
+          status=$(curl -s -o chat.json -w '%{http_code}' -X POST http://localhost:8000/chat \
+            -H 'Content-Type: application/json' -H 'X-Employee-Id: EMP-001' \
+            -d '{"message": "Hola"}')
+          cat chat.json
+          test "$status" = 503
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color
+      - name: Stop
+        if: always()
+        run: docker compose down -v

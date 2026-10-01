@@ -17,6 +17,7 @@ from tests.fakes import (
     FakeIncidents,
     FakeSearch,
     FixedJudge,
+    RootRunRecorder,
     ScriptedChatModel,
     answer,
     approval_case,
@@ -164,3 +165,20 @@ def test_limit_takes_the_first_selected_cases() -> None:
     cases = [make_case(id=f"DEV-0{i}") for i in range(1, 4)]
 
     assert [c.id for c in select_cases(cases, "dev", None, 2)] == ["DEV-01", "DEV-02"]
+
+
+async def test_each_invocation_is_its_own_trace_with_the_case_metadata() -> None:
+    recorder = RootRunRecorder()
+
+    result = await run_case(
+        deps([PROPOSAL, answer("Incidencia INC-000001 registrada.")]),
+        approval_case("approve"),
+        EMPLOYEE,
+        mode=RetrievalMode.HYBRID,
+        callbacks=[recorder],
+    )
+
+    assert len(result.trace_ids) == 2  # the question, then the resume after the approval
+    assert [str(run_id) for run_id, _ in recorder.roots] == result.trace_ids
+    assert {m["case_id"] for _, m in recorder.roots} == {"APR-99"}
+    assert {m["thread_id"] for _, m in recorder.roots} == {result.thread_id}

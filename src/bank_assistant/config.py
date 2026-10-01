@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     agent_recursion_limit: int = Field(default=20, gt=0)
     request_timeout_s: float = Field(default=120.0, gt=0)
 
+    # --- Traces (LangSmith), off by default; see tracing.py ---
+    # Our own switch, not LANGSMITH_TRACING: that one turns on LangChain's global tracer,
+    # which would upload runs without the anonymizer.
+    trace_to_langsmith: bool = False
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "banco-olvessa"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+
     # --- Evaluation harness (evals/agent_eval.py) ---
     # A different model from the agent's, with its own free-tier quota, to limit
     # self-preference. Checked against known verdicts with `make eval-judge` (D-30, D-32).

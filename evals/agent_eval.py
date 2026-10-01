@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from langchain_core.callbacks import Callbacks
 from langchain_core.language_models import BaseChatModel
 from langchain_core.rate_limiters import InMemoryRateLimiter
 
@@ -67,6 +68,7 @@ async def evaluate(
     concurrency: int = 1,
     recursion_limit: int = 20,
     metadata: dict[str, Any] | None = None,
+    callbacks: Callbacks = None,
     on_result: Callable[[RunRecord], None] | None = None,
 ) -> list[RunRecord]:
     semaphore = asyncio.Semaphore(concurrency)
@@ -84,6 +86,7 @@ async def evaluate(
                 repeat=repeat,
                 recursion_limit=recursion_limit,
                 metadata=metadata,
+                callbacks=callbacks,
             )
             judgement: Judgement | None = None
             judge_error = None
@@ -147,6 +150,7 @@ def record_to_json(record: RunRecord) -> dict[str, Any]:
         "tokens": {"input": run.input_tokens, "output": run.output_tokens},
         "judge_tokens": {"input": record.judge_input_tokens, "output": record.judge_output_tokens},
         "latency_s": round(run.latency_s, 2),
+        "trace_ids": run.trace_ids,
         "evidence": run.evidence,
     }
 
@@ -175,6 +179,7 @@ async def main_async(settings: Settings, args: argparse.Namespace) -> int:
     from bank_assistant.llm import build_chat_model
     from bank_assistant.prompts import load_prompt
     from bank_assistant.services import agent_deps, build_embedder
+    from bank_assistant.tracing import build_tracer
 
     cases = select_cases(load_dataset(DATASET), args.split, args.cases, args.limit)
     if not cases:
@@ -210,16 +215,20 @@ async def main_async(settings: Settings, args: argparse.Namespace) -> int:
         "top_k": settings.retrieval_top_k,
         "embedding_model": settings.embedding_model,
         "requests_per_minute": settings.eval_requests_per_minute,
+        "traces": f"{settings.langsmith_project}-evals" if settings.trace_to_langsmith else None,
         "concurrency": args.concurrency,
         "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     print(f"Evaluating {len(cases)} case(s) x {args.repeat} on {mode.value}, {prompt.label}")
 
+    # Evaluation traces go to their own project, apart from the API's.
+    tracer = build_tracer(settings, project=f"{settings.langsmith_project}-evals")
+    callbacks: Callbacks = [tracer] if tracer else None
     pool = await open_pool(settings.database_url)
     try:
         embedder = await asyncio.to_thread(build_embedder, settings)
         deps = agent_deps(settings, pool, embedder, rate_limited_model(settings.llm_model), prompt)
-        judge = Judge(rate_limited_model(settings.judge_model), judge_prompt)
+        judge = Judge(rate_limited_model(settings.judge_model), judge_prompt, callbacks)
         records = await evaluate(
             deps,
             judge,
@@ -230,10 +239,13 @@ async def main_async(settings: Settings, args: argparse.Namespace) -> int:
             concurrency=args.concurrency,
             recursion_limit=settings.agent_recursion_limit,
             metadata={"agent_prompt": prompt.label, "retrieval_mode": mode.value},
+            callbacks=callbacks,
             on_result=_progress(len(cases) * args.repeat),
         )
     finally:
         await pool.close()
+        if tracer is not None:
+            await asyncio.to_thread(tracer.wait_for_futures)
 
     summary = summarise([r.score for r in records])
     reasons = QualityGate().evaluate(summary)

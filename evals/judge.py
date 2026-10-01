@@ -16,6 +16,7 @@ import html
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.callbacks import Callbacks
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -94,13 +95,22 @@ class Judgement:
 
 
 class Judge:
-    def __init__(self, model: BaseChatModel, prompt: Prompt) -> None:
+    def __init__(self, model: BaseChatModel, prompt: Prompt, callbacks: Callbacks = None) -> None:
         self.prompt = prompt
         self._model = model.with_structured_output(JudgeVerdict, include_raw=True)
+        self._callbacks = callbacks
 
     async def judge(self, case: EvalCase, run: CaseRun) -> Judgement:
         messages = [SystemMessage(self.prompt.text), HumanMessage(judge_input(case, run))]
-        result: Any = await self._model.ainvoke(messages)
+        result: Any = await self._model.ainvoke(
+            messages,
+            {
+                "run_name": "eval_judge",
+                "tags": ["eval", "judge", case.id],
+                "metadata": {"case_id": case.id, "repeat": run.repeat, "thread_id": run.thread_id},
+                "callbacks": self._callbacks,
+            },
+        )
         raw, parsed = result["raw"], result["parsed"]
         usage = raw.usage_metadata if isinstance(raw, AIMessage) else None
         if not isinstance(parsed, JudgeVerdict):

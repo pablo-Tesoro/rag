@@ -131,7 +131,7 @@ def _run_config(services: Services, employee: Employee, thread_id: str) -> Runna
         "configurable": {"thread_id": thread_id},
         "recursion_limit": settings.agent_recursion_limit,
         "run_name": "chat_turn",
-        # Trace metadata (LangSmith picks it up when enabled). No personal data.
+        # Trace metadata, for filtering in LangSmith. No personal data.
         "metadata": {
             "employee_ref": pseudonymize(
                 employee.id, settings.log_pseudonym_key.get_secret_value()
@@ -146,6 +146,7 @@ def _run_config(services: Services, employee: Employee, thread_id: str) -> Runna
             f"prompt:{services.prompt.version}",
             f"retrieval:{settings.retrieval_mode}",
         ],
+        "callbacks": list(services.callbacks),
     }
 
 

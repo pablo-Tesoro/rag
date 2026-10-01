@@ -10,7 +10,7 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 | 2 | Ingesta y recuperación | ✅ Terminada y verificada con el modelo real |
 | 3 | Agente y API | ✅ Terminada y probada con Gemini |
 | 4 | Evaluación (harness, métricas, puerta de calidad) | 🟡 Línea base medida en dev: 19 de 20; la puerta falla por PER-01 |
-| 5 | Trazas, Docker y CI | ⏳ Pendiente |
+| 5 | Trazas, Docker y CI | 🟡 Implementada y probada en local; falta ver la CI en verde en GitHub |
 | 6 | Ablación y README | ⏳ Pendiente |
 
 ## Fase 1: qué hay
@@ -226,6 +226,28 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 3. Cerrar la fase 4 con la línea base y la decisión documentadas. El split de test sigue sin
    ejecutarse.
 
+## Fase 5: qué hay
+
+- Trazas (D-34): `src/bank_assistant/tracing.py`.
+  - Interruptor `TRACE_TO_LANGSMITH`, apagado por defecto.
+  - Tracer explícito con un anonimizador: ids de empleado seudonimizados como en los logs;
+    DNI, NIE, IBAN, correo y teléfono sustituidos por marcadores.
+  - Proyecto `banco-olvessa` para la API y `banco-olvessa-evals` para las evaluaciones, con
+    `thread_id` en los metadatos y los ids de traza en el informe de evaluación.
+  - Sin clave el servicio arranca igual.
+- CI (D-35):
+  - `.github/workflows/ci.yml` con los trabajos `check`, `retrieval` (puerta de regresión de
+    la recuperación) y `docker` (imagen, stack, ingesta y readiness).
+  - `.github/workflows/eval.yml`, evaluación del agente bajo demanda.
+  - Ambos pasan `actionlint`.
+- `make eval-retrieval` aplica ahora la puerta de regresión en dev. En local da los mismos
+  números que en la fase 2 (hybrid 0,962 y 0,910) y la pasa.
+- Los tests de integración fallan en lugar de saltarse si `REQUIRE_POSTGRES=1`.
+- Verificado en local: los tests de trazas usan un endpoint falso de LangSmith y examinan lo
+  que se habría subido. La construcción de la imagen y la evaluación bajo demanda se
+  verifican en GitHub: aquí el sistema de permisos deniega construir la imagen con la CA
+  del proxy.
+
 ## Incidente de seguridad (30/09/2026)
 
 - Se subió a la rama, desde GitHub, un commit (`e8a6d63`) que escribía una clave real de
@@ -244,7 +266,10 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 - ✅ Nueva `GOOGLE_API_KEY` en la configuración del entorno: la sesión la ve y funciona.
 - ⚠️ Confirmar que la clave expuesta está revocada en Google AI Studio: desde aquí no se
   puede comprobar.
-- Opcional: `LANGSMITH_API_KEY` para las trazas de la fase 5.
+- Opcional: `LANGSMITH_API_KEY` (y `TRACE_TO_LANGSMITH=true`) en el `.env` local o en la
+  configuración del entorno, para ver trazas reales.
+- Para `eval.yml`: añadir `GOOGLE_API_KEY` como secreto del repositorio en GitHub (Settings →
+  Secrets and variables → Actions). Solo se puede lanzar cuando el workflow esté en `main`.
 - Opcional: consultar en `aistudio.google.com/rate-limit` los límites diarios del tier
   gratuito de `gemini-3.5-flash-lite` (agente) y `gemini-3.1-flash-lite` (juez), para
   planificar las ejecuciones con `--repeat 3`.

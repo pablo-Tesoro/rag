@@ -115,3 +115,17 @@ Each model gets its own client-side rate limiter (`EVAL_REQUESTS_PER_MINUTE`) an
 attempts with exponential backoff on 429 and 5xx. Daily quotas are per project and model and
 are only visible in AI Studio. `gemini-3.5-flash` allows 20 requests per day, not enough to
 judge a full run, and `gemini-2.5-flash` is closed to new users; hence the judge above.
+
+## Retrieval regression gate
+
+`make eval-retrieval` (no LLM calls) also fails when the deployed retrieval mode drops below
+recall@5 0.90 or MRR@10 0.85 on dev (`RetrievalGate` in `retrieval_eval.py`). The thresholds
+come from the phase 2 baseline (hybrid: 0.962 and 0.910) and are a guard against regressions,
+not a quality target: losing a whole case that used to be found fails it. CI runs it on
+every pull request.
+
+## Traces
+
+With `TRACE_TO_LANGSMITH=true` and `LANGSMITH_API_KEY`, every case and every judgement is
+traced to the `<LANGSMITH_PROJECT>-evals` project, with identifiers masked before upload
+(`src/bank_assistant/tracing.py`). Each run in the JSON report lists its `trace_ids`.

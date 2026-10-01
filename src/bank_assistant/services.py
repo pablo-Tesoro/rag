@@ -9,9 +9,10 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
@@ -30,6 +31,7 @@ from bank_assistant.ingestion.chunking import ChunkConfig
 from bank_assistant.llm import build_chat_model
 from bank_assistant.prompts import Prompt, load_prompt
 from bank_assistant.retrieval.retriever import Retriever
+from bank_assistant.tracing import build_tracer
 
 AgentGraph = CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]
 
@@ -89,6 +91,8 @@ class Services:
     prompt: Prompt
     readiness: Callable[[], Awaitable[dict[str, bool]]]
     unavailable_reason: str | None = None
+    # Handlers attached to every agent run: the LangSmith tracer when tracing is on.
+    callbacks: list[BaseCallbackHandler] = field(default_factory=list)
 
 
 @asynccontextmanager
@@ -164,14 +168,21 @@ async def open_services(
                 checks["database"] = False
             return checks
 
-        yield Services(
-            settings=settings,
-            graph=graph,
-            employees=EmployeeDirectory.from_file(settings.employees_file),
-            prompt=prompt,
-            readiness=readiness,
-            unavailable_reason=unavailable_reason,
-        )
+        tracer = build_tracer(settings)
+        try:
+            yield Services(
+                settings=settings,
+                graph=graph,
+                employees=EmployeeDirectory.from_file(settings.employees_file),
+                prompt=prompt,
+                readiness=readiness,
+                unavailable_reason=unavailable_reason,
+                callbacks=[tracer] if tracer else [],
+            )
+        finally:
+            if tracer is not None:
+                # Traces are uploaded in the background: send what is pending before exit.
+                await asyncio.to_thread(tracer.wait_for_futures)
     finally:
         await checkpoint_pool.close()
         await pool.close()

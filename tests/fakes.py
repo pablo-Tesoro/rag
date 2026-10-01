@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.callbacks import BaseCallbackHandler, CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -79,9 +79,11 @@ class ScriptedChatModel(BaseChatModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    script: list[AIMessage]
-    received: list[list[BaseMessage]] = Field(default_factory=list)
-    bound_tools: list[dict[str, Any]] = Field(default_factory=list)
+    # Out of the repr: a traced run sends the model's repr as its configuration, and a real
+    # model's configuration never holds conversation content.
+    script: list[AIMessage] = Field(repr=False)
+    received: list[list[BaseMessage]] = Field(default_factory=list, repr=False)
+    bound_tools: list[dict[str, Any]] = Field(default_factory=list, repr=False)
 
     @property
     def _llm_type(self) -> str:
@@ -318,3 +320,23 @@ class FixedJudge:
         if self.fail:
             raise TimeoutError("judge timed out")
         return Judgement(JudgeScores(True, True, 1.0), input_tokens=50, output_tokens=5)
+
+
+class RootRunRecorder(BaseCallbackHandler):
+    """Records the id and metadata of every root run, as a tracer would receive them."""
+
+    def __init__(self) -> None:
+        self.roots: list[tuple[UUID, dict[str, Any]]] = []
+
+    def on_chain_start(
+        self,
+        serialized: dict[str, Any] | None,
+        inputs: Any,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if parent_run_id is None:
+            self.roots.append((run_id, dict(metadata or {})))

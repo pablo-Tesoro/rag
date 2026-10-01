@@ -4,7 +4,8 @@ The case runs in-process on the same graph and dependencies as the API (`agent_d
 two differences: incidents go to a sandbox, and conversations live in an in-memory
 checkpointer. The run records everything the checks and the judge need: the final answer,
 every tool call the model attempted, what was retrieved, the tool results the model saw
-(the evidence for the judge), how the approval went, tokens and latency.
+(the evidence for the judge), how the approval went, tokens and latency. When tracing is
+on, it also records the id of each traced invocation, to go from a failed case to its trace.
 
 The harness answers approval interrupts itself: with the case's decision the first time,
 and with a rejection for anything else (it never approves a write it was not told to).
@@ -15,6 +16,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from langchain_core.callbacks import Callbacks
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
@@ -63,6 +65,7 @@ class CaseRun:
     output_tokens: int = 0
     latency_s: float = 0.0
     error: str | None = None
+    trace_ids: list[str] = field(default_factory=list)  # one per invocation (turn or resume)
 
 
 async def run_case(
@@ -74,6 +77,7 @@ async def run_case(
     repeat: int = 1,
     recursion_limit: int = 20,
     metadata: dict[str, Any] | None = None,
+    callbacks: Callbacks = None,
 ) -> CaseRun:
     sandbox = SandboxIncidents()
     graph = build_graph(replace(deps, incidents=sandbox), checkpointer=InMemorySaver())
@@ -83,10 +87,23 @@ async def run_case(
         "recursion_limit": recursion_limit,
         "run_name": "eval_case",
         "tags": ["eval", case.id],
-        "metadata": {"case_id": case.id, "repeat": repeat, **(metadata or {})},
+        # LangSmith groups the runs of a conversation by `thread_id`.
+        "metadata": {
+            "case_id": case.id,
+            "repeat": repeat,
+            "thread_id": thread_id,
+            **(metadata or {}),
+        },
+        "callbacks": callbacks,
     }
     context = AgentContext(employee=employee, retrieval_mode=mode)
     run = CaseRun(case_id=case.id, repeat=repeat, thread_id=thread_id)
+
+    def traced(config: RunnableConfig) -> RunnableConfig:
+        trace_id = uuid.uuid4()
+        run.trace_ids.append(str(trace_id))
+        return {**config, "run_id": trace_id}
+
     started = time.perf_counter()
     try:
         state: AgentState = {
@@ -95,7 +112,7 @@ async def run_case(
             "retrieved": {},
             "final_answer": None,
         }
-        result: dict[str, Any] = await graph.ainvoke(state, config, context=context)
+        result: dict[str, Any] = await graph.ainvoke(state, traced(config), context=context)
         rounds = 0
         while result.get("__interrupt__"):
             rounds += 1
@@ -109,7 +126,7 @@ async def run_case(
             approve = first and case.approval is not None and case.approval.decision == "approve"
             run.decisions[proposal["tool_call_id"]] = approve
             command: Command[Any] = Command(resume={"approved": approve})
-            result = await graph.ainvoke(command, config, context=context)
+            result = await graph.ainvoke(command, traced(config), context=context)
         _record_final_state(run, result)
     except Exception as error:  # the run is reported as an error, not as a quality failure
         run.error = f"{type(error).__name__}: {str(error)[:300]}"

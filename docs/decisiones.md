@@ -528,3 +528,78 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
 - **Trade-offs.** No se repite v1 en todo dev con `--repeat 3`: la cuota diaria del tier
   gratuito no da para las dos ejecuciones completas. La comparación directa se limita a los
   casos afectados; el resto de dev se compara con la línea base de una repetición.
+
+## D-34. Trazas en LangSmith: opcionales, enmascaradas en origen y separadas de los logs
+
+- **Contexto.** Los logs no llevan contenido (D-10). Para depurar un agente hace falta ver la
+  pregunta, lo recuperado y cada paso del modelo. LangSmith lo registra con LangGraph sin
+  instrumentar nada a mano.
+- **Alternativas.**
+  - Activar el trazado global de LangChain con `LANGSMITH_TRACING=true`: no requiere
+    código, pero sube todas las ejecuciones sin enmascarar y no permite elegir cuáles.
+  - OpenTelemetry con un backend propio: es estándar, pero obliga a instrumentar a mano lo
+    que LangSmith ya entiende (ejecuciones anidadas, mensajes, tokens).
+  - No trazar: depurar un fallo se queda en los logs, que no tienen contenido.
+- **Elección.**
+  - Un interruptor propio, `TRACE_TO_LANGSMITH`, apagado por defecto. `tracing.py` construye
+    el tracer y se pasa en la configuración de cada ejecución, tanto en la API como en la
+    evaluación.
+  - El cliente de LangSmith aplica un anonimizador a entradas, salidas, errores y metadatos
+    antes de subir nada:
+    - los ids de empleado pasan a ser el mismo seudónimo HMAC de los logs, para poder
+      cruzar un log con su traza;
+    - DNI, NIE, IBAN, correo y teléfono se sustituyen por marcadores.
+  - Metadatos para filtrar: versión del prompt, modo de recuperación, modelo y `thread_id`.
+    LangSmith agrupa por `thread_id` las ejecuciones de una conversación, incluida la
+    reanudación tras una aprobación.
+  - Las evaluaciones van a su propio proyecto (`banco-olvessa-evals`), y el informe guarda el
+    id de cada ejecución trazada para ir de un caso fallido a su traza.
+  - Sin clave, el servicio arranca igual y registra `tracing.disabled`. Si alguien activa
+    el trazado global, se registra un aviso.
+- **Verificación.** No hay clave de LangSmith en el entorno. Un test apunta el cliente a un
+  endpoint falso local y examina los bytes que se habrían subido:
+  - ni el id de empleado ni el DNI salen en claro;
+  - sí salen el seudónimo, los marcadores y el contenido de negocio.
+  El test encontró que la parte `serialized` (la configuración del componente) no pasa por
+  el anonimizador. Con el modelo real solo contiene la clase y sus parámetros, con la clave
+  como marcador secreto. El doble de pruebas, en cambio, guardaba su guion ahí, y se ha
+  excluido de su `repr`.
+- **Trade-offs.**
+  - El enmascarado por expresiones regulares solo cubre formatos conocidos: un nombre propio
+    escrito por el empleado no se detecta.
+  - En producción harían falta además control de acceso y retención en el proyecto de
+    LangSmith, o una instancia autoalojada.
+  - No se ha probado contra LangSmith real.
+
+## D-35. CI: lo determinista en cada cambio y lo que gasta cuota, bajo demanda
+
+- **Contexto.** La puerta del agente necesita el LLM, y el tier gratuito tiene cuota diaria.
+  El resto de comprobaciones es determinista y gratis.
+- **Elección.**
+  - `ci.yml` se ejecuta en cada pull request y en `main`, con tres trabajos en paralelo:
+    - `check`: ruff, mypy y pytest contra un Postgres de servicio (pgvector), con
+      `REQUIRE_POSTGRES=1` para que los tests de integración no se salten en silencio.
+      `uv sync --locked` falla si el lockfile no está al día.
+    - `retrieval`: ingesta con el modelo real de embeddings (en caché) y
+      `make eval-retrieval` con una puerta de regresión: recall@5 ≥ 0,90 y MRR@10 ≥ 0,85
+      para el modo desplegado en dev. Es una guarda frente a regresiones, derivada de la
+      línea base de la fase 2 (0,962 y 0,910), no un objetivo de calidad. Perder un caso
+      entero la hace fallar; que un caso baje un puesto, no.
+    - `docker`: construye la imagen y levanta el stack. Comprueba que `/healthz` responde y
+      que `/readyz` da 503 sin datos ni clave. Después carga los datos dentro del stack y
+      comprueba que todo está listo salvo el LLM y que `/chat` responde 503 con el motivo.
+  - `eval.yml`, bajo demanda (`workflow_dispatch`): ingesta, controles del juez y evaluación
+    del agente con la puerta de calidad. El informe queda como artefacto y en el resumen
+    del job. Necesita el secreto `GOOGLE_API_KEY`. Las entradas llegan al script como
+    variables de entorno y los ids de caso se validan, para evitar inyecciones en el shell.
+  - Permisos mínimos (`contents: read`). CI cancela las ejecuciones obsoletas de una misma
+    rama. La evaluación no se cancela y va de una en una, porque las ejecuciones comparten
+    cuota.
+- **Trade-offs.**
+  - Las acciones se fijan por versión mayor (`@v4`, `@v6`), no por SHA. Es más fácil de
+    mantener, pero un tag movido podría cambiar el código que se ejecuta. En un repositorio
+    de producción se fijarían por SHA y se actualizarían con Dependabot.
+  - La puerta del agente no bloquea los PR: un cambio de prompt debe ir acompañado de una
+    ejecución de `eval.yml`, por disciplina y no por automatismo.
+  - `eval.yml` solo se puede lanzar desde la rama por defecto y con el secreto configurado:
+    no se ha podido ejecutar todavía.
