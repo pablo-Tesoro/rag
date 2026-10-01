@@ -281,6 +281,31 @@ registraron en D-33 antes de ejecutar nada (commit `927d40d`).
   `make readme` a partir de los ficheros de `evals/results/` y un test impide que se
   desfasen (D-37).
 
+## Demo (`make demo`)
+
+- `scripts/demo.py` recorre las técnicas contra la API en marcha, con narración en
+  español. Guarda lo que ve en `docs/demo/transcript.json` (commit `2756898`, prompt v2,
+  hybrid).
+- Al grabarla por primera vez, el límite de 15 peticiones por minuto del tier gratuito
+  llegaba al cliente como un 500. Ahora la API responde 503 con `Retry-After` (D-38), y la
+  demo espera y reintenta.
+- Lo que muestra la transcripción guardada, revisado a mano:
+  - Las diez escenas terminan sin error.
+  - EMP-001 no recibe nada de NOR-011 ni NOR-012. EMP-002 obtiene el Comité de Riesgos
+    Territorial.
+  - El canario de la inyección no aparece.
+  - Otra oficina e inexistente reciben el mismo texto.
+  - La aprobación por otro empleado da 404, y repetir la aprobación da 409. La incidencia
+    se crea una sola vez (INC-000003).
+  - El rechazo no escribe nada.
+- Fallos del modelo que se ven en la transcripción y no se han ocultado:
+  - EMP-001 se abstiene en el texto, pero deja `sin_evidencia` en `false`. Es el mismo
+    fallo de PER-01 visto en la ablación. La seguridad no depende de esto: el filtro está
+    en SQL.
+  - Las dos consultas de operación no accesible reciben del core exactamente el mismo
+    texto. Aun así, el modelo marca `sin_evidencia` distinto en cada una. Es variabilidad
+    del modelo y no un oráculo: lo que llega al modelo es idéntico.
+
 ## Siguiente paso
 
 El plan de seis fases está completo. Posibles continuaciones:
