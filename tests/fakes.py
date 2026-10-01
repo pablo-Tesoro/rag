@@ -16,7 +16,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, SkipValidation
 
 from bank_assistant.core_banking.models import Operation, OperationStatus, OperationType
 from bank_assistant.incidents.repository import Incident, IncidentRequest
@@ -74,14 +74,16 @@ class ScriptedChatModel(BaseChatModel):
     """Chat model that replies with a fixed script of messages, one per call.
 
     It records the messages it receives and the tools bound to it, so tests can assert on
-    what the agent sent. Running out of script fails the test loudly.
+    what the agent sent. An exception in the script is raised instead of replying (a
+    provider error). Running out of script fails the test loudly.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # Out of the repr: a traced run sends the model's repr as its configuration, and a real
-    # model's configuration never holds conversation content.
-    script: list[AIMessage] = Field(repr=False)
+    # model's configuration never holds conversation content. Not validated: pydantic would
+    # try to coerce a scripted exception into a message.
+    script: SkipValidation[list[AIMessage | Exception]] = Field(repr=False)
     received: list[list[BaseMessage]] = Field(default_factory=list, repr=False)
     bound_tools: list[dict[str, Any]] = Field(default_factory=list, repr=False)
 
@@ -99,7 +101,10 @@ class ScriptedChatModel(BaseChatModel):
         self.received.append(list(messages))
         if not self.script:
             raise AssertionError("ScriptedChatModel ran out of scripted responses")
-        return ChatResult(generations=[ChatGeneration(message=self.script.pop(0))])
+        reply = self.script.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return ChatResult(generations=[ChatGeneration(message=reply)])
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> "ScriptedChatModel":
         self.bound_tools = [convert_to_openai_tool(tool) for tool in tools]

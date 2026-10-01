@@ -668,3 +668,26 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
   - El texto escrito a mano no lleva cifras medidas: solo las explica.
 - **Trade-offs.** Cambiar una cifra exige apuntar a otra ejecución guardada, que es justo lo
   que se busca. El formato de las tablas queda en código y no en el Markdown.
+
+## D-38. Un límite del proveedor del LLM es un 503 con Retry-After, no un 500
+
+- **Contexto.** Al grabar la demo, varias preguntas seguidas superaron el límite por minuto
+  del tier gratuito (15 peticiones por minuto y modelo). El SDK reintenta dos veces en unos
+  segundos, pero Gemini pedía esperar unos 10 s. La excepción llegaba a FastAPI y el cliente
+  recibía un `500 Internal Server Error`, igual que ante un fallo nuestro.
+- **Elección.**
+  - `_run_turn` captura `ModelError` de `langchain_core`. Es la jerarquía común de errores
+    de proveedor, así que no se ata la API a Gemini.
+  - Si el error es reintentable (`is_retryable`: límite de peticiones, caída temporal), la
+    API responde `503` con `Retry-After: 30`. Si no lo es (petición rechazada), responde
+    `502`.
+  - El detalle del proveedor no llega al cliente. El log `chat.turn` registra solo el tipo
+    de error.
+  - La demo (`make demo`) respeta `Retry-After`: espera y repite la petición, como haría un
+    cliente real. Además deja una pausa entre escenas para no agotar el minuto.
+- **Alternativas.** Un limitador de peticiones en la propia API, como el del harness (D-32).
+  Haría esperar al usuario en lugar de fallar. Pero sería por proceso: con varias réplicas
+  no garantiza el límite del proyecto, y alargaría peticiones que ya tienen un timeout de
+  120 s. Se deja para cuando haya un proveedor de pago o una cola.
+- **Trade-offs.** Si el fallo ocurre al reanudar tras una aprobación, la incidencia ya está
+  escrita (de forma idempotente), pero ese turno se queda sin respuesta final.

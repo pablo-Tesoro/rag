@@ -133,6 +133,7 @@ LangGraph StateGraph  (checkpointed in Postgres: conversations and pending appro
   answer format each have one place and one test.
 - **API** ([`api/app.py`](src/bank_assistant/api/app.py)): FastAPI with liveness and
   readiness probes; the service starts without an LLM key and reports why it is not ready.
+  A provider rate limit or outage is answered with `503` and `Retry-After`, not a `500`.
 - **Observability**: JSON logs without personal data or free text; optional LangSmith traces
   with identifiers masked before they leave the process
   ([`tracing.py`](src/bank_assistant/tracing.py)).
@@ -166,6 +167,11 @@ curl -s -X POST localhost:8000/chat -H 'Content-Type: application/json' \
 
 A proposed incident comes back as `pending_approval`; approve or reject it with
 `POST /chat/{thread_id}/approval` and `{"approved": true}`.
+
+`make demo` walks through every technique against the running API (permissions, the
+obsolete policy, the planted prompt injection, abstention, approval and rejection), narrated
+in Spanish, and saves what it saw to [`docs/demo/transcript.json`](docs/demo/transcript.json).
+It makes about 30 LLM calls.
 
 Development (Python 3.12 and [uv](https://docs.astral.sh/uv/)):
 
