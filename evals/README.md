@@ -82,7 +82,8 @@ share of answers closed with `responder` are reported as diagnostics.
 
 ### The judge
 
-`google_genai:gemini-3.5-flash` by default (`JUDGE_MODEL`), with the versioned prompt
+`google_genai:gemini-3.1-flash-lite` by default (`JUDGE_MODEL`): a different model from the
+agent's, with its own free-tier quota (see `docs/decisiones.md`, D-32). Versioned prompt
 `prompts/eval_judge/v1.md`. It returns one yes/no verdict per key fact, whether the answer
 contradicts the reference, and the list of unsupported claims, as structured output that
 code validates (one verdict per fact, or the judgement is an error). It sees the tool results
@@ -112,5 +113,5 @@ date; on the free tier the actual cost is 0.
 
 Each model gets its own client-side rate limiter (`EVAL_REQUESTS_PER_MINUTE`) and up to six
 attempts with exponential backoff on 429 and 5xx. Daily quotas are per project and model and
-are only visible in AI Studio; for `gemini-3.5-flash` it was 20 requests per day, which is
-not enough to judge a full run (see `docs/progreso.md`).
+are only visible in AI Studio. `gemini-3.5-flash` allows 20 requests per day, not enough to
+judge a full run, and `gemini-2.5-flash` is closed to new users; hence the judge above.

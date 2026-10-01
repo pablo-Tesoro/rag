@@ -56,8 +56,9 @@ class Settings(BaseSettings):
     request_timeout_s: float = Field(default=120.0, gt=0)
 
     # --- Evaluation harness (evals/agent_eval.py) ---
-    # A stronger model than the agent's, from outside its size tier, to limit self-preference.
-    judge_model: str = "google_genai:gemini-3.5-flash"
+    # A different model from the agent's, with its own free-tier quota, to limit
+    # self-preference. Checked against known verdicts with `make eval-judge` (D-30, D-32).
+    judge_model: str = "google_genai:gemini-3.1-flash-lite"
     judge_prompt_version: str = "v1"
     # Client-side limit per model (agent and judge each get their own), under the free tier.
     eval_requests_per_minute: float = Field(default=10.0, gt=0)

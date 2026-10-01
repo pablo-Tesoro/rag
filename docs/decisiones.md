@@ -436,8 +436,8 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
     que el agente leyó. Completa D-20, que solo comprueba que la fuente citada se recuperó.
   - Salida estructurada validada por código: si falta o sobra un veredicto, el juicio es un
     error, no un aprobado.
-  - El juez es un modelo distinto y más capaz que el del agente, para limitar la
-    autopreferencia (ver D-32 sobre su cuota).
+  - El juez es un modelo distinto del agente, para limitar la autopreferencia. No es más
+    capaz: lo impone la cuota del tier gratuito (D-32).
 - **Cómo se ha validado el juez.**
   - Primera ejecución real: el juez suspendió APR-01 porque la respuesta decía «incidencia
     registrada» y la referencia describe el proceso («propone… espera la confirmación»). No
@@ -481,7 +481,17 @@ escritas para poder defenderlas en una entrevista. Se añaden entradas al cerrar
     inventado.
   - Si una ejecución falla por cuota, queda como error y la puerta la marca incompleta; no
     se reintenta en silencio.
-- **Hallazgo.** La cuota gratuita de `gemini-3.5-flash` es de 20 peticiones por día
-  (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`). No basta para juzgar una ejecución
-  completa de dev (unas 17 llamadas al juez por repetición). La elección del juez queda
-  pendiente del propietario.
+- **El juez y su cuota.**
+  - La primera opción era `gemini-3.5-flash`, más capaz que el agente. Su cuota gratuita es
+    de 20 peticiones por día (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`) y una
+    ejecución de dev necesita unas 17 llamadas al juez por repetición.
+  - `gemini-2.5-flash` aparece en `models.list`, pero responde 404: ya no admite usuarios
+    nuevos.
+  - Elegido: `gemini-3.1-flash-lite`, la generación anterior de la familia lite. Es un modelo
+    distinto del agente, con su propia cuota, y fijo (sin alias como
+    `gemini-flash-lite-latest`, que cambian de destino y rompen la reproducibilidad).
+  - No es más capaz que el agente, y eso es un riesgo: un juez débil puede dejar pasar
+    errores sutiles. Se compensa con veredictos binarios contra una referencia (una tarea
+    más fácil que la del agente), con los controles de `make eval-judge` (4 de 4 de acuerdo,
+    `evals/results/20261001T095702Z_judge_controls.json`) y con la revisión manual de cada
+    fallo.
