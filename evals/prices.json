@@ -1,11 +1,21 @@
 {
   "notice": "Paid-tier (Standard) prices, used only to report what a run would cost outside the free tier. Update them together with source and retrieved.",
   "source": "https://ai.google.dev/gemini-api/docs/pricing",
-  "retrieved": "2026-09-30",
+  "retrieved": "2026-10-01",
   "currency": "USD",
   "unit": "per 1M tokens (output tokens include thinking tokens, as LangChain reports them)",
   "models": {
-    "google_genai:gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50},
-    "google_genai:gemini-3.5-flash": {"input": 1.50, "output": 9.00}
+    "google_genai:gemini-3.5-flash-lite": {
+      "input": 0.3,
+      "output": 2.5
+    },
+    "google_genai:gemini-3.5-flash": {
+      "input": 1.5,
+      "output": 9.0
+    },
+    "google_genai:gemini-3.1-flash-lite": {
+      "input": 0.25,
+      "output": 1.5
+    }
   }
 }

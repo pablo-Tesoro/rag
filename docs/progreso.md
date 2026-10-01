@@ -9,7 +9,7 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 | 1 | Esqueleto y datos | ✅ Terminada (dataset revisado y aprobado) |
 | 2 | Ingesta y recuperación | ✅ Terminada y verificada con el modelo real |
 | 3 | Agente y API | ✅ Terminada y probada con Gemini |
-| 4 | Evaluación (harness, métricas, puerta de calidad) | 🟡 Harness terminado; falta elegir el juez y la primera ejecución completa |
+| 4 | Evaluación (harness, métricas, puerta de calidad) | 🟡 Línea base medida en dev: 19 de 20; la puerta falla por PER-01 |
 | 5 | Trazas, Docker y CI | ⏳ Pendiente |
 | 6 | Ablación y README | ⏳ Pendiente |
 
@@ -177,13 +177,54 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 - Observación: en la API, `LLM_MAX_RETRIES=2` significa 2 intentos (1 reintento), porque el
   SDK de Google lo interpreta como intentos. No se ha cambiado.
 
+## Fase 4: línea base en dev (prompt v1)
+
+- Juez: `gemini-2.5-flash` responde 404 (ya no admite usuarios nuevos), así que se eligió
+  `gemini-3.1-flash-lite` (D-32). Acertó los 4 controles por los motivos correctos
+  (`evals/results/20261001T095702Z_judge_controls.json`).
+- Ejecución completa de dev, `--repeat 1`, commit `b17d1c8`
+  (`evals/results/20261001T100314Z_agent_dev.*`):
+
+  | Métrica | Valor |
+  |---|---|
+  | Tasa de aprobados | 0,95 (19 de 20) |
+  | Casos críticos fallidos | 1 de 4 (PER-01) |
+  | Violaciones de seguridad | 0 |
+  | Errores | 0 |
+  | Corrección y fundamentación (juez) | 1,00 (17 de 17) |
+  | Recall de evidencia del agente | 1,00 |
+  | Respuestas con `responder` | 1,00 |
+
+- Puerta de calidad: **FAIL**, por PER-01 (crítico). No hay fuga: NOR-011 y NOR-012 no se
+  recuperaron nunca. Falla la abstención. El agente no tiene la respuesta y lo dice, pero
+  marca `sin_evidencia: false` para poder citar NOR-002 §5, el documento público que remite
+  a NOR-011. Es la tensión que ya se vio en la fase 3: el contrato obliga a elegir entre
+  abstenerse y citar la remisión, porque con `sin_evidencia` el grafo vacía las citas
+  (D-20). En la fase 3 el modelo se abstuvo; aquí eligió citar.
+- Revisión manual de los 17 veredictos del juez: coincido en todos. Comprobé en el corpus
+  los datos que el juez no comentó (la revisión mensual y la exención para empleados de
+  NOR-001 §5, N2 hasta 400.000 € en NOR-012 §2, el recargo OUR de NOR-003 §4, la fecha de
+  OP-208871) y todos están respaldados. En MUL-04 hay una frase torpe sobre OUR/SHA, sin
+  datos falsos.
+- Frente a las observaciones de la fase 3: OPE-01 ya aplica el plazo de 24 horas de
+  NOR-005 §5. Sigue la tercera persona en OPE-04 («para la oficina del empleado»).
+- Uso: 49 llamadas del agente (97.809 tokens de entrada y 3.745 de salida; equivalente de
+  pago 0,0387 $) y 17 del juez (33.828 y 2.437; 0,0121 $, calculado aparte porque el precio
+  del juez se añadió a `prices.json` después de la ejecución). Latencia por caso: p50 34 s y
+  p95 86 s, con las esperas del limitador incluidas.
+- Con una sola repetición no se puede hablar de consistencia: PER-01 se abstuvo bien en la
+  fase 3 y aquí no.
+
 ## Siguiente paso
 
-1. Elegir el modelo del juez según las cuotas del tier gratuito (decisión del propietario).
-2. `make eval-judge` con ese juez y la primera ejecución completa de dev, con autorización
-   del propietario. Revisar a mano cada veredicto del juez.
-3. Con esa línea base, decidir si se hace un prompt `v2` con las observaciones de la fase 3
-   y medirlo con el mismo harness.
+1. Decidir cómo resolver PER-01 (decisión del propietario). Propuesta: un prompt `v2` que
+   pida abstenerse y citar la remisión cuando la normativa solo remite a un documento
+   inaccesible, y que el grafo conserve las citas válidas también con `sin_evidencia`. Es
+   un cambio de D-20 que hay que medir.
+2. Medir v1 y la alternativa con `--repeat 3` en dev (unas 150 llamadas del agente y 51 del
+   juez por ejecución), con autorización del propietario.
+3. Cerrar la fase 4 con la línea base y la decisión documentadas. El split de test sigue sin
+   ejecutarse.
 
 ## Incidente de seguridad (30/09/2026)
 
@@ -204,8 +245,9 @@ Estado del proyecto para poder retomarlo en otra sesión. Se actualiza al cerrar
 - ⚠️ Confirmar que la clave expuesta está revocada en Google AI Studio: desde aquí no se
   puede comprobar.
 - Opcional: `LANGSMITH_API_KEY` para las trazas de la fase 5.
-- Pendiente: consultar en `aistudio.google.com/rate-limit` los límites diarios del tier
-  gratuito para `gemini-3.5-flash-lite` (agente) y los candidatos a juez.
+- Opcional: consultar en `aistudio.google.com/rate-limit` los límites diarios del tier
+  gratuito de `gemini-3.5-flash-lite` (agente) y `gemini-3.1-flash-lite` (juez), para
+  planificar las ejecuciones con `--repeat 3`.
 
 ## Notas del entorno en la nube
 
